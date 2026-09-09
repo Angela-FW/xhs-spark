@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, ImageIcon, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, Copy, ImageIcon, RefreshCw, Upload, X } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
 import { generateNoteFromPost, formatFullNote } from "@/lib/note-gen";
 import {
   buildCoverImageUrl,
   buildCoverImageUrlAlt,
   buildCoverPrompt,
+  buildImg2ImgUrl,
+  editCoverFromFile,
 } from "@/lib/cover-image";
 import { pillarLabel, phaseLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
@@ -43,6 +45,14 @@ export function GeneratePanel() {
   const [imgError, setImgError] = useState(false);
   const [useAlt, setUseAlt] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [refFile, setRefFile] = useState<File | null>(null);
+  const [refPreview, setRefPreview] = useState<string | null>(null);
+  const [refUrl, setRefUrl] = useState("");
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [mode, setMode] = useState<"text" | "ref">("text");
+  const [busy, setBusy] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("pollinations-key") ?? "";
@@ -54,20 +64,88 @@ export function GeneratePanel() {
     setImgError(false);
     setUseAlt(false);
     setSeed(0);
+    setResultUrl(null);
+    setGenError(null);
+    setMode("text");
   }, [post?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (refPreview?.startsWith("blob:")) URL.revokeObjectURL(refPreview);
+      if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
+    };
+  }, [refPreview, resultUrl]);
 
   const note = useMemo(
     () => (post ? generateNoteFromPost(post, extra) : null),
     [post, extra],
   );
 
-  const coverUrl = useMemo(() => {
+  const textCoverUrl = useMemo(() => {
     if (!post) return "";
     const opts = { seed: seed || undefined, key: apiKey || undefined };
     return useAlt
       ? buildCoverImageUrlAlt(post, opts)
       : buildCoverImageUrl(post, opts);
   }, [post, seed, apiKey, useAlt]);
+
+  const displayUrl =
+    mode === "ref" && resultUrl
+      ? resultUrl
+      : mode === "ref" && refUrl.trim() && post
+        ? buildImg2ImgUrl(post, refUrl.trim(), {
+            seed: seed || undefined,
+            key: apiKey || undefined,
+          })
+        : textCoverUrl;
+
+  async function onPickFile(file: File | null) {
+    if (refPreview?.startsWith("blob:")) URL.revokeObjectURL(refPreview);
+    setRefFile(file);
+    setResultUrl(null);
+    setGenError(null);
+    if (!file) {
+      setRefPreview(null);
+      return;
+    }
+    setRefPreview(URL.createObjectURL(file));
+    setMode("ref");
+  }
+
+  async function generateFromReference() {
+    if (!post) return;
+    setGenError(null);
+    setImgError(false);
+
+    // Prefer uploaded file → POST edits
+    if (refFile) {
+      setBusy(true);
+      try {
+        const url = await editCoverFromFile(post, refFile, {
+          seed: seed || Date.now() % 100000,
+          key: apiKey || undefined,
+        });
+        if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
+        setResultUrl(url);
+        setMode("ref");
+      } catch (err) {
+        setGenError(err instanceof Error ? err.message : "图生图失败");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Public URL → GET kontext
+    if (refUrl.trim()) {
+      setMode("ref");
+      setResultUrl(null);
+      setSeed((s) => s + 1 || Date.now() % 100000);
+      return;
+    }
+
+    setGenError("请先上传一张参考图，或填写可公网访问的图片链接");
+  }
 
   if (!post || !note) {
     return (
@@ -182,10 +260,27 @@ export function GeneratePanel() {
             <Button
               type="button"
               size="sm"
+              variant={mode === "text" ? "default" : "outline"}
+              className={
+                mode === "text"
+                  ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+                  : ""
+              }
+              onClick={() => {
+                setMode("text");
+                setImgError(false);
+              }}
+            >
+              纯文生图
+            </Button>
+            <Button
+              type="button"
+              size="sm"
               variant="outline"
               onClick={() => {
                 setSeed((s) => s + 1 || Date.now() % 100000);
                 setImgError(false);
+                if (mode === "ref" && refFile) void generateFromReference();
               }}
             >
               <RefreshCw className="size-3.5" />
@@ -194,10 +289,88 @@ export function GeneratePanel() {
             <CopyBtn text={buildCoverPrompt(post)} label="复制提示词" />
           </div>
         </div>
+
         <p className="text-xs text-[var(--ink-soft)]">
-          默认使用 Pollinations 免费接口（无需服务器）。额度紧张时可在下方填可选
-          API Key。不含视频成片。
+          可纯文字生成，或上传你的照片/实拍图，按当前笔记主题做图生图。免费接口可能限流；上传图生图失败时可填
+          API Key。
         </p>
+
+        <div className="mt-4 rounded-xl border border-dashed border-[var(--ink-soft)]/25 bg-white/55 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-[var(--ink)]">参考图（可选）</p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => fileRef.current?.click()}
+              >
+                <Upload className="size-3.5" />
+                上传图片
+              </Button>
+              {(refFile || refPreview || refUrl) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    onPickFile(null);
+                    setRefUrl("");
+                    setMode("text");
+                  }}
+                >
+                  <X className="size-3.5" />
+                  清除
+                </Button>
+              )}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
+
+          {refPreview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={refPreview}
+              alt="参考图预览"
+              className="mt-3 max-h-40 rounded-lg object-contain"
+            />
+          ) : null}
+
+          <div className="mt-3 space-y-2">
+            <Label htmlFor="refurl">或填写公网图片链接</Label>
+            <Input
+              id="refurl"
+              value={refUrl}
+              onChange={(e) => {
+                setRefUrl(e.target.value);
+                if (e.target.value.trim()) setMode("ref");
+              }}
+              className="bg-white/80"
+              placeholder="https://…（可选，与上传二选一即可）"
+            />
+          </div>
+
+          <Button
+            type="button"
+            className="mt-3 bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+            disabled={busy}
+            onClick={() => void generateFromReference()}
+          >
+            {busy ? "基于参考图生成中…" : "基于参考图生成封面"}
+          </Button>
+          {genError ? (
+            <p className="mt-2 text-sm text-[var(--coral)]" role="alert">
+              {genError}
+            </p>
+          ) : null}
+        </div>
+
         <div className="mt-3 space-y-2">
           <Label htmlFor="pkey">Pollinations API Key（可选）</Label>
           <Input
@@ -208,11 +381,16 @@ export function GeneratePanel() {
               localStorage.setItem("pollinations-key", e.target.value);
             }}
             className="bg-white/80"
-            placeholder="可留空；有 Key 时写入本地浏览器"
+            placeholder="可留空；上传图生图若失败再填"
           />
         </div>
+
         <div className="mt-4 overflow-hidden rounded-xl bg-white/70">
-          {imgError ? (
+          {busy ? (
+            <div className="px-4 py-16 text-center text-sm text-[var(--ink-soft)]">
+              正在按参考图生成，请稍候…
+            </div>
+          ) : imgError ? (
             <div className="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-[var(--ink-soft)]">
               <ImageIcon className="size-8 opacity-50" />
               <p>图片加载失败（免费接口可能限流）。可换一张，或改用备用线路。</p>
@@ -231,12 +409,12 @@ export function GeneratePanel() {
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              key={coverUrl}
-              src={coverUrl}
+              key={displayUrl}
+              src={displayUrl}
               alt="生成的封面图"
               className="mx-auto max-h-[480px] w-full object-contain"
               onError={() => {
-                if (!useAlt) {
+                if (mode === "text" && !useAlt) {
                   setUseAlt(true);
                   setImgError(false);
                 } else {

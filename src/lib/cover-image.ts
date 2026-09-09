@@ -24,6 +24,14 @@ export function buildCoverPrompt(post: CalendarPost): string {
   ].join(", ");
 }
 
+export function buildImg2ImgPrompt(post: CalendarPost): string {
+  return [
+    buildCoverPrompt(post),
+    "Keep the same person/face identity and main composition from the reference photo",
+    "Restyle as Xiaohongshu vertical cover, soft lighting, tasteful, no text",
+  ].join(", ");
+}
+
 export function buildCoverImageUrl(
   post: CalendarPost,
   options?: { seed?: number; key?: string },
@@ -40,11 +48,9 @@ export function buildCoverImageUrl(
   });
   if (options?.key) params.set("key", options.key);
 
-  // Primary: classic Pollinations prompt endpoint (often works without key for light use)
   return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
 }
 
-/** Alternate endpoint if primary fails to load */
 export function buildCoverImageUrlAlt(
   post: CalendarPost,
   options?: { seed?: number; key?: string },
@@ -59,6 +65,116 @@ export function buildCoverImageUrlAlt(
   });
   if (options?.key) params.set("key", options.key);
   return `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?${params.toString()}`;
+}
+
+/** Text+reference via GET (needs a publicly reachable image URL). */
+export function buildImg2ImgUrl(
+  post: CalendarPost,
+  referenceImageUrl: string,
+  options?: { seed?: number; key?: string },
+): string {
+  const prompt = buildImg2ImgPrompt(post);
+  const seed = options?.seed ?? hashSeed(post.id + referenceImageUrl.slice(-12));
+  const params = new URLSearchParams({
+    model: "kontext",
+    image: referenceImageUrl,
+    width: String(WIDTH),
+    height: String(HEIGHT),
+    seed: String(seed),
+    nologo: "true",
+  });
+  if (options?.key) params.set("key", options.key);
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
+}
+
+/**
+ * Upload a local reference file and request an edited cover.
+ * Uses Pollinations OpenAI-compatible edits endpoint.
+ */
+export async function editCoverFromFile(
+  post: CalendarPost,
+  file: File,
+  options?: { seed?: number; key?: string; signal?: AbortSignal },
+): Promise<string> {
+  const prompt = buildImg2ImgPrompt(post);
+  const compressed = await compressImageFile(file, 1280, 0.85);
+
+  const form = new FormData();
+  form.append("image", compressed, compressed.name || "reference.jpg");
+  form.append("prompt", prompt);
+  form.append("model", "kontext");
+  form.append("size", `${WIDTH}x${HEIGHT}`);
+  if (options?.seed != null) form.append("seed", String(options.seed));
+
+  const headers: HeadersInit = {};
+  if (options?.key) headers["x-pollinations-key"] = options.key;
+
+  // Local Next.js proxy avoids browser CORS with Pollinations
+  const res = await fetch("/api/cover-edit", {
+    method: "POST",
+    headers,
+    body: form,
+    signal: options?.signal,
+  });
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    const detail =
+      typeof payload === "object" && payload && "error" in payload
+        ? String((payload as { error?: string }).error ?? "")
+        : "";
+    throw new Error(
+      `图生图失败 (${res.status})。${
+        res.status === 401 || res.status === 402
+          ? "可能需要填写 Pollinations API Key。"
+          : detail || "请稍后重试或改用参考图公网链接。"
+      }`,
+    );
+  }
+
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const json = (await res.json()) as {
+      data?: { b64_json?: string; url?: string }[];
+      error?: string;
+    };
+    if (json.error) throw new Error(json.error);
+    const first = json.data?.[0];
+    if (first?.url) return first.url;
+    if (first?.b64_json) return `data:image/png;base64,${first.b64_json}`;
+    throw new Error("接口未返回图片数据");
+  }
+
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export async function compressImageFile(
+  file: File,
+  maxSide = 1280,
+  quality = 0.85,
+): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", quality),
+  );
+  if (!blob) return file;
+  return new File([blob], file.name.replace(/\.\w+$/, ".jpg"), {
+    type: "image/jpeg",
+  });
 }
 
 function hashSeed(id: string): number {
