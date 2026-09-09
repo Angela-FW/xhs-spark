@@ -66,7 +66,7 @@ export function DialoguePanel() {
     <div className="space-y-4">
       <PendingBanner />
       <div className="studio-shell flex h-[min(70vh,640px)] flex-col rounded-2xl p-4 sm:p-5">
-        <h3 className="font-display text-lg text-[var(--ink)]">对话校准</h3>
+        <h3 className="font-display text-lg text-[var(--ink)]">对话微调</h3>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
           用自然语言改未来规划。系统先出预览，你确认后才写入。
         </p>
@@ -100,7 +100,7 @@ export function DialoguePanel() {
           <Textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="输入校准指令…"
+            placeholder="输入你想怎么调整未来规划…"
             className="min-h-14 bg-white/80"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

@@ -5,7 +5,6 @@ import { AppStoreProvider, useAppStore } from "@/components/app-store";
 import { CalendarBoard } from "@/components/calendar-board";
 import { InsightInbox } from "@/components/insight-inbox";
 import { DialoguePanel } from "@/components/dialogue-panel";
-import { FeedbackPanel } from "@/components/feedback-panel";
 import { GeneratePanel } from "@/components/generate-panel";
 import { PERSONA } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
@@ -14,7 +13,6 @@ const TABS = [
   { id: "calendar", label: "日历" },
   { id: "insights", label: "感悟" },
   { id: "dialogue", label: "对话" },
-  { id: "feedback", label: "校准" },
   { id: "generate", label: "生成" },
 ] as const;
 
@@ -42,7 +40,7 @@ function PlannerInner() {
         >
           <p className="brand-mark text-4xl tracking-wide sm:text-5xl">重启笔记</p>
           <h1 className="font-display mt-3 text-xl text-[var(--ink)] sm:text-2xl">
-            文案 + 一年规划，按反馈校准
+            文案 + 一年规划，边写边调整
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ink-soft)] sm:text-base">
             {PERSONA.age}岁 · {PERSONA.education} · {PERSONA.stage}
@@ -127,7 +125,6 @@ function PlannerInner() {
           {tab === "calendar" ? <CalendarBoard /> : null}
           {tab === "insights" ? <InsightInbox /> : null}
           {tab === "dialogue" ? <DialoguePanel /> : null}
-          {tab === "feedback" ? <FeedbackPanel /> : null}
           {tab === "generate" ? <GeneratePanel /> : null}
         </div>
       </div>
