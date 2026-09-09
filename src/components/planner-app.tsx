@@ -43,7 +43,7 @@ function PlannerInner() {
             文案 + 一年规划，边写边调整
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ink-soft)] sm:text-base">
-            {PERSONA.age}岁 · {PERSONA.education} · {PERSONA.stage}
+            {PERSONA.age}岁 · {PERSONA.background} · {PERSONA.stage}
             。从 {state.calendarStart} 起排内容阶段；生成小红书文案与免费封面图，不生成视频。
           </p>
           <div className="mt-4 flex flex-wrap gap-2">

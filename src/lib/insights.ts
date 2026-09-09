@@ -45,12 +45,11 @@ function softenFiller(s: string): string {
   return s
     .replace(/^(我觉得|我感觉|其实|真的是|就是|然后就|然后|突然就)/, "")
     .replace(/一定要加油/g, "先把下一步做清楚")
-    .replace(/相信自己/g, "把证据写进经历里")
     .replace(/非常非常/g, "挺")
     .replace(/真的很/g, "很")
+    .replace(/^经过了/, "")
     .replace(/已经渐渐/g, "渐渐")
     .replace(/已经是/g, "是")
-    .replace(/经过了最近/g, "最近这")
     .replace(/总觉得/g, "老觉得")
     .trim();
 }
@@ -69,16 +68,6 @@ function normalizeCmp(s: string): string {
   return s.replace(/[。！？，,\s\n]/g, "");
 }
 
-function hashSeed(input: string): number {
-  let h = 0;
-  for (let i = 0; i < input.length; i++) h = (h * 131 + input.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-function pick<T>(list: T[], offset: number): T {
-  return list[offset % list.length];
-}
-
 function compactLines(text: string): string {
   return text
     .replace(/[ \t]+\n/g, "\n")
@@ -89,221 +78,92 @@ function compactLines(text: string): string {
     .trim();
 }
 
-function hookFor(pillar: PillarId, head: string, seed: number): string {
-  const h = stripPeriod(head);
-  const byPillar: Record<PillarId, string[]> = {
-    restart: [
-      `${h}。\n不是鸡汤，是我这周真实卡住的地方。`,
-      `${h}。\n离职后最难的，往往不是找工作，是先把自己稳住。`,
-    ],
-    "age-edu": [
-      `${h}。\n标签一出来，人会先紧一下。`,
-      `${h}。\n双非也好，年龄也好，我听见了，但不跟它抬杠。`,
-    ],
-    resume: [
-      `${h}。\n改简历改到烦的时候，通常不是不够努力，是方向糊了。`,
-      `${h}。\n我终于意识到：写满，不等于写清。`,
-    ],
-    interview: [
-      `${h}。\n面试最折磨的，不是问题难，是说完才知道哪句没落地。`,
-      `${h}。\n现场我记的不是输赢，是哪一句没讲清。`,
-    ],
-    rejection: [
-      `${h}。\n已读不回的瞬间，胃会先紧一下。`,
-      `${h}。\n难受可以，但我不拿一次结果否定整个人。`,
-    ],
-    choice: [
-      `${h}。\n不是没有选择，是怕选错成本太高。`,
-      `${h}。\n两个选项摆一起，人反而更容易停住。`,
-    ],
-    life: [
-      `${h}。\n求职之外，这些小事也在把我拉回地面。`,
-      `${h}。\n日子还得过，人才能继续往前走。`,
-    ],
-  };
-  return pick(byPillar[pillar], seed);
-}
-
-function closeFor(pillar: PillarId, seed: number): string {
-  const byPillar: Record<PillarId, string[]> = {
-    restart: [
-      "我不急着证明自己重启成功。\n先把眼前这一步做清楚。",
-      "今天能推进一格，就算有效。",
-    ],
-    "age-edu": [
-      "标签可以听见。\n证据更要写清楚。",
-      "我不跟标签吵架，我改成给可验证的结果。",
-    ],
-    resume: [
-      "下一步我只改一个变量：\n要么删形容词，要么提高匹配度。",
-      "少海投一点，把一句话说清楚，往往更管用。",
-    ],
-    interview: [
-      "下次开口，我先把最硬的一句证据放前面。",
-      "复盘只问三句：哪里卡、怎么改、下次第一句说什么。",
-    ],
-    rejection: [
-      "难过计时结束，我就回去改渠道或表达。\n不改自尊。",
-      "允许难受一小会儿，然后只改一件事继续。",
-    ],
-    choice: [
-      "决定前先过一遍非情绪清单。\n冷静天再动。",
-      "先把底线写下来，再谈感觉。",
-    ],
-    life: [
-      "求职之外，我仍把日子留一点给自己。",
-      "把一件小事做完，人会踏实一点。",
-    ],
-  };
-  return pick(byPillar[pillar], seed);
+function rewriteClause(clause: string): string {
+  return softenFiller(clause)
+    .replace(/一边([^，。]+)一边([^，。]+)一边([^，。]+)/, "一边$1，一边$2，一边$3")
+    .replace(/我已经渐渐适应了/, "我渐渐适应了")
+    .replace(/我渐渐适应了当下的节奏/, "我渐渐摸到了当下的节奏")
+    .replace(/适应了当下的节奏/, "摸到了当下的节奏")
+    .trim();
 }
 
 /**
- * Rewrite scattered thoughts into Xiaohongshu-ready short prose.
- * Keep facts; change rhythm, hooks, and speakable wording.
+ * Polish only what the user wrote: shorter lines, clearer rhythm, Xiaohongshu voice.
+ * Never invent unrelated advice (no pillar template closers).
  */
-export function polishLine(raw: string, pillar: PillarId = "resume"): string {
+export function polishLine(raw: string, _pillar: PillarId = "resume"): string {
   const cleaned = raw.trim().replace(/\s+/g, " ");
   if (!cleaned) return cleaned;
 
-  const clauses = splitClauses(cleaned).map(softenFiller).filter(Boolean);
-  if (!clauses.length) return ensurePeriod(softenFiller(cleaned));
+  const clauses = splitClauses(cleaned)
+    .map(rewriteClause)
+    .filter(Boolean);
+  if (!clauses.length) return ensurePeriod(rewriteClause(cleaned));
 
-  const seed = hashSeed(`${pillar}:${cleaned}`);
-  const dayHit = cleaned.match(/第\s*(\d+)\s*天/);
-  const adaptHit = /适应|习惯|渐渐|开始变成|居然/.test(cleaned);
-  const seaHit = /石沉大海|已读不回|没回音|石沉|拒信|挂了/.test(cleaned);
-  const resumeHit = /简历|投递|海投|STAR|作品集|形容词/.test(cleaned);
+  const dayHit = cleaned.match(/(?:第|经过了?)\s*(\d+)\s*天/);
+  const hasParallel = /一边.+一边/.test(cleaned);
+  const adaptHit = /适应|渐渐|节奏|习惯/.test(cleaned);
 
-  const head = clauses[0];
-  const mid = clauses.slice(1, -1);
-  const last = clauses.length > 1 ? clauses[clauses.length - 1] : "";
-  const detail = mid.length
-    ? mid.map((c) => stripPeriod(c)).join("，")
-    : last
-      ? stripPeriod(last)
-      : "";
+  let lines: string[] = [];
 
-  let polished = "";
-
-  if (dayHit && (adaptHit || seaHit || resumeHit || /面试|日常/.test(cleaned))) {
+  if (dayHit && adaptHit) {
     const day = dayHit[1];
     const rest = clauses
-      .filter((c) => !/第\s*\d+\s*天/.test(c))
       .map((c) =>
-        c
-          .replace(/渐渐适应了|已经渐渐适应了|适应了/g, "")
-          .trim(),
+        stripPeriod(
+          c
+            .replace(/(?:第|经过了?)?\s*\d+\s*天的?调整/, "")
+            .replace(/(?:第|经过了?)?\s*\d+\s*天/, "")
+            .trim(),
+        ),
       )
       .filter(Boolean);
-    const before = rest[0] ? `前些天还在硬扛：${stripPeriod(rest[0])}。` : "";
-    const now =
-      rest.length > 1
-        ? `这几天居然摸到一点节奏——\n${rest
-            .slice(1)
-            .map((c) =>
-              stripPeriod(c)
-                .replace(/都开始变成习惯/, "也开始变成习惯")
-                .replace(/开始变成习惯/, "变成了习惯"),
-            )
-            .join("，")}。`
-        : rest[0]
-          ? `这几天居然开始把「${stripPeriod(rest[0])}」当成日常。`
-          : "这几天居然开始摸到一点节奏。";
-    polished = `投递第${day}天了。\n\n${before}\n${now}\n\n${closeFor(pillar, seed)}`;
-  } else if (pillar === "rejection" || (seaHit && pillar !== "interview")) {
-    polished = [
-      hookFor("rejection", head, seed),
-      "",
-      detail ? `${ensurePeriod(detail)}` : "",
-      last && mid.length ? ensurePeriod(last) : "",
-      "",
-      closeFor("rejection", seed + 1),
-    ]
-      .filter(Boolean)
-      .join("\n");
-  } else if (pillar === "interview") {
-    polished = [
-      hookFor("interview", head, seed),
-      "",
-      detail ? `现场真正卡住的是：${ensurePeriod(detail)}` : "现场我记的不是输赢，是哪一句没说清。",
-      last && mid.length ? ensurePeriod(last) : "",
-      "",
-      closeFor("interview", seed + 1),
-    ]
-      .filter(Boolean)
-      .join("\n");
-  } else if (pillar === "age-edu") {
-    polished = [
-      hookFor("age-edu", head, seed),
-      "",
-      detail
-        ? `具体一点：${ensurePeriod(detail)}`
-        : "我不急着辩解学历和年龄，先把能交付的证据摆出来。",
-      last && mid.length ? ensurePeriod(last) : "",
-      "",
-      closeFor("age-edu", seed + 1),
-    ]
-      .filter(Boolean)
-      .join("\n");
-  } else if (pillar === "resume") {
-    polished = [
-      hookFor("resume", head, seed),
-      "",
-      detail ? `这周真实发生的是：\n${ensurePeriod(detail)}` : ensurePeriod(last || head),
-      last && mid.length ? ensurePeriod(last) : "",
-      "",
-      closeFor("resume", seed + 1),
-    ]
-      .filter(Boolean)
-      .join("\n");
-  } else if (pillar === "life") {
-    polished = [
-      hookFor("life", head, seed),
-      "",
-      detail ? `${ensurePeriod(detail)}` : "求职之外，我仍把日子过出一点形状。",
-      last && mid.length ? ensurePeriod(last) : "",
-      "",
-      closeFor("life", seed + 1),
-    ]
-      .filter(Boolean)
-      .join("\n");
-  } else if (pillar === "choice") {
-    polished = [
-      hookFor("choice", head, seed),
-      "",
-      detail ? `我卡住的点是：${ensurePeriod(detail)}` : ensurePeriod(last || head),
-      last && mid.length ? ensurePeriod(last) : "",
-      "",
-      closeFor("choice", seed + 1),
-    ]
-      .filter(Boolean)
-      .join("\n");
+    lines = [`${day}天了。`, ""];
+    if (rest[0]) lines.push(ensurePeriod(rest[0]));
+    if (rest.length > 1) {
+      lines.push("");
+      const tail = rest.slice(1);
+      if (hasParallel || tail.some((t) => t.includes("一边"))) {
+        lines.push(
+          ...tail.flatMap((part) => {
+            const bits = part.split(/一边/).map((b) => b.trim()).filter(Boolean);
+            if (bits.length > 1 || /^一边/.test(part) || part.includes("一边")) {
+              return part
+                .split(/(?=一边)/)
+                .map((b) => b.trim())
+                .filter(Boolean)
+                .map((b) => ensurePeriod(b));
+            }
+            return [ensurePeriod(part)];
+          }),
+        );
+      } else {
+        lines.push(...tail.map((t) => ensurePeriod(t)));
+      }
+    }
+  } else if (clauses.length === 1) {
+    lines = [ensurePeriod(clauses[0])];
+  } else if (clauses.length === 2) {
+    lines = [ensurePeriod(clauses[0]), "", ensurePeriod(clauses[1])];
   } else {
-    polished = [
-      hookFor(pillar, head, seed),
+    // Hook from first clause, body from middle, soft close from last — all from input
+    lines = [
+      ensurePeriod(clauses[0]),
       "",
-      detail ? `${ensurePeriod(detail)}` : "",
-      last && mid.length ? `后来我想明白一件事：\n${ensurePeriod(last)}` : last ? ensurePeriod(last) : "",
+      ...clauses.slice(1, -1).map((c) => ensurePeriod(c)),
       "",
-      closeFor(pillar, seed + 1),
-    ]
-      .filter(Boolean)
-      .join("\n");
+      ensurePeriod(clauses[clauses.length - 1]),
+    ];
   }
 
-  polished = compactLines(polished);
+  let polished = compactLines(lines.filter((l, i, arr) => !(l === "" && arr[i - 1] === "")).join("\n"));
   if (!/[。！？]$/.test(polished)) polished += "。";
 
+  // If somehow identical, only change rhythm (line breaks), still no invented content
   if (normalizeCmp(polished) === normalizeCmp(cleaned)) {
-    polished = [
-      hookFor(pillar, head, seed + 7),
-      "",
-      ensurePeriod(cleaned.length > 48 ? `${cleaned.slice(0, 48)}…` : cleaned),
-      "",
-      closeFor(pillar, seed + 8),
-    ].join("\n");
-    polished = compactLines(polished);
+    polished = compactLines(
+      clauses.map((c) => ensurePeriod(c)).join("\n\n"),
+    );
   }
 
   return polished;

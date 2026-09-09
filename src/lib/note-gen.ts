@@ -250,7 +250,7 @@ function buildHook(title: string, post: CalendarPost, seed: number): string {
 
 function buildIdentity(post: CalendarPost): string {
   if (post.trustAnchor) return endSentence(post.trustAnchor);
-  return `${PERSONA.age}岁，${PERSONA.education}，现在还在找工作。`;
+  return `${PERSONA.age}岁，${PERSONA.background}，现在还在找工作。`;
 }
 
 function buildTipsBody(
