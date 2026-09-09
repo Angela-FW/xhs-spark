@@ -32,12 +32,26 @@ export function buildImg2ImgPrompt(post: CalendarPost): string {
   ].join(", ");
 }
 
+function resolvePrompt(
+  post: CalendarPost,
+  customPrompt?: string,
+  forImg2Img = false,
+): string {
+  const custom = customPrompt?.trim();
+  if (custom) {
+    return forImg2Img
+      ? `${custom}. Keep the same person/face identity and main composition from the reference photo, Xiaohongshu vertical cover 3:4, no text overlay`
+      : custom;
+  }
+  return forImg2Img ? buildImg2ImgPrompt(post) : buildCoverPrompt(post);
+}
+
 export function buildCoverImageUrl(
   post: CalendarPost,
-  options?: { seed?: number; key?: string },
+  options?: { seed?: number; prompt?: string },
 ): string {
-  const prompt = buildCoverPrompt(post);
-  const seed = options?.seed ?? hashSeed(post.id);
+  const prompt = resolvePrompt(post, options?.prompt, false);
+  const seed = options?.seed ?? hashSeed(post.id + prompt.slice(0, 24));
   const params = new URLSearchParams({
     width: String(WIDTH),
     height: String(HEIGHT),
@@ -46,24 +60,22 @@ export function buildCoverImageUrl(
     nologo: "true",
     enhance: "true",
   });
-  if (options?.key) params.set("key", options.key);
 
   return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
 }
 
 export function buildCoverImageUrlAlt(
   post: CalendarPost,
-  options?: { seed?: number; key?: string },
+  options?: { seed?: number; prompt?: string },
 ): string {
-  const prompt = buildCoverPrompt(post);
-  const seed = options?.seed ?? hashSeed(post.id) + 7;
+  const prompt = resolvePrompt(post, options?.prompt, false);
+  const seed = options?.seed ?? hashSeed(post.id + prompt.slice(0, 24)) + 7;
   const params = new URLSearchParams({
     model: "flux",
     width: String(WIDTH),
     height: String(HEIGHT),
     seed: String(seed),
   });
-  if (options?.key) params.set("key", options.key);
   return `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?${params.toString()}`;
 }
 
@@ -71,10 +83,11 @@ export function buildCoverImageUrlAlt(
 export function buildImg2ImgUrl(
   post: CalendarPost,
   referenceImageUrl: string,
-  options?: { seed?: number; key?: string },
+  options?: { seed?: number; prompt?: string },
 ): string {
-  const prompt = buildImg2ImgPrompt(post);
-  const seed = options?.seed ?? hashSeed(post.id + referenceImageUrl.slice(-12));
+  const prompt = resolvePrompt(post, options?.prompt, true);
+  const seed =
+    options?.seed ?? hashSeed(post.id + referenceImageUrl.slice(-12) + prompt.slice(0, 16));
   const params = new URLSearchParams({
     model: "kontext",
     image: referenceImageUrl,
@@ -83,7 +96,6 @@ export function buildImg2ImgUrl(
     seed: String(seed),
     nologo: "true",
   });
-  if (options?.key) params.set("key", options.key);
   return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
 }
 
@@ -94,9 +106,9 @@ export function buildImg2ImgUrl(
 export async function editCoverFromFile(
   post: CalendarPost,
   file: File,
-  options?: { seed?: number; key?: string; signal?: AbortSignal },
+  options?: { seed?: number; prompt?: string; signal?: AbortSignal },
 ): Promise<string> {
-  const prompt = buildImg2ImgPrompt(post);
+  const prompt = resolvePrompt(post, options?.prompt, true);
   const compressed = await compressImageFile(file, 1280, 0.85);
 
   const form = new FormData();
@@ -106,13 +118,9 @@ export async function editCoverFromFile(
   form.append("size", `${WIDTH}x${HEIGHT}`);
   if (options?.seed != null) form.append("seed", String(options.seed));
 
-  const headers: HeadersInit = {};
-  if (options?.key) headers["x-pollinations-key"] = options.key;
-
   // Local Next.js proxy avoids browser CORS with Pollinations
   const res = await fetch("/api/cover-edit", {
     method: "POST",
-    headers,
     body: form,
     signal: options?.signal,
   });
@@ -125,9 +133,7 @@ export async function editCoverFromFile(
         : "";
     throw new Error(
       `图生图失败 (${res.status})。${
-        res.status === 401 || res.status === 402
-          ? "可能需要填写 Pollinations API Key。"
-          : detail || "请稍后重试或改用参考图公网链接。"
+        detail || "请稍后重试，或改用公网图片链接 + 提示词生成。"
       }`,
     );
   }

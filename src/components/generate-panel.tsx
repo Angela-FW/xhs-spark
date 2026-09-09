@@ -49,7 +49,7 @@ export function GeneratePanel() {
   const [seed, setSeed] = useState(0);
   const [imgError, setImgError] = useState(false);
   const [useAlt, setUseAlt] = useState(false);
-  const [apiKey, setApiKey] = useState("");
+  const [coverPrompt, setCoverPrompt] = useState("");
   const [refFile, setRefFile] = useState<File | null>(null);
   const [refPreview, setRefPreview] = useState<string | null>(null);
   const [refUrl, setRefUrl] = useState("");
@@ -60,11 +60,6 @@ export function GeneratePanel() {
   const [justGenerated, setJustGenerated] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("pollinations-key") ?? "";
-    setApiKey(saved);
-  }, []);
 
   useEffect(() => {
     setTitleIndex(0);
@@ -78,8 +73,10 @@ export function GeneratePanel() {
     setJustGenerated(false);
     if (post) {
       setNote(generateNoteFromPost(post, ""));
+      setCoverPrompt(buildCoverPrompt(post));
     } else {
       setNote(null);
+      setCoverPrompt("");
     }
   }, [post?.id]);
 
@@ -101,13 +98,15 @@ export function GeneratePanel() {
     }, 50);
   }
 
+  const activePrompt = coverPrompt.trim();
+
   const textCoverUrl = useMemo(() => {
     if (!post) return "";
-    const opts = { seed: seed || undefined, key: apiKey || undefined };
+    const opts = { seed: seed || undefined, prompt: activePrompt || undefined };
     return useAlt
       ? buildCoverImageUrlAlt(post, opts)
       : buildCoverImageUrl(post, opts);
-  }, [post, seed, apiKey, useAlt]);
+  }, [post, seed, useAlt, activePrompt]);
 
   const displayUrl =
     mode === "ref" && resultUrl
@@ -115,7 +114,7 @@ export function GeneratePanel() {
       : mode === "ref" && refUrl.trim() && post
         ? buildImg2ImgUrl(post, refUrl.trim(), {
             seed: seed || undefined,
-            key: apiKey || undefined,
+            prompt: activePrompt || undefined,
           })
         : textCoverUrl;
 
@@ -137,13 +136,12 @@ export function GeneratePanel() {
     setGenError(null);
     setImgError(false);
 
-    // Prefer uploaded file → POST edits
     if (refFile) {
       setBusy(true);
       try {
         const url = await editCoverFromFile(post, refFile, {
           seed: seed || Date.now() % 100000,
-          key: apiKey || undefined,
+          prompt: activePrompt || undefined,
         });
         if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
         setResultUrl(url);
@@ -156,7 +154,6 @@ export function GeneratePanel() {
       return;
     }
 
-    // Public URL → GET kontext
     if (refUrl.trim()) {
       setMode("ref");
       setResultUrl(null);
@@ -165,6 +162,18 @@ export function GeneratePanel() {
     }
 
     setGenError("请先上传一张参考图，或填写可公网访问的图片链接");
+  }
+
+  function generateFromPromptOnly() {
+    if (!activePrompt) {
+      setGenError("请先填写提示词");
+      return;
+    }
+    setGenError(null);
+    setMode("text");
+    setImgError(false);
+    setResultUrl(null);
+    setSeed((s) => s + 1 || Date.now() % 100000);
   }
 
   if (!post || !note) {
@@ -297,18 +306,10 @@ export function GeneratePanel() {
             <Button
               type="button"
               size="sm"
-              variant={mode === "text" ? "default" : "outline"}
-              className={
-                mode === "text"
-                  ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-                  : ""
-              }
-              onClick={() => {
-                setMode("text");
-                setImgError(false);
-              }}
+              className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+              onClick={generateFromPromptOnly}
             >
-              纯文生图
+              按提示词生图
             </Button>
             <Button
               type="button"
@@ -323,14 +324,24 @@ export function GeneratePanel() {
               <RefreshCw className="size-3.5" />
               换一张
             </Button>
-            <CopyBtn text={buildCoverPrompt(post)} label="复制提示词" />
+            <CopyBtn text={activePrompt || buildCoverPrompt(post)} label="复制提示词" />
           </div>
         </div>
 
         <p className="text-xs text-[var(--ink-soft)]">
-          可纯文字生成，或上传你的照片/实拍图，按当前笔记主题做图生图。免费接口可能限流；上传图生图失败时可填
-          API Key。
+          可改提示词后生图；也可上传参考图，用「提示词 + 图片」一起生成新封面。免费接口可能限流。
         </p>
+
+        <div className="mt-4 space-y-2">
+          <Label htmlFor="cover-prompt">提示词</Label>
+          <Textarea
+            id="cover-prompt"
+            value={coverPrompt}
+            onChange={(e) => setCoverPrompt(e.target.value)}
+            className="min-h-28 bg-white/80"
+            placeholder="描述你想要的封面画面、风格、人物、场景…"
+          />
+        </div>
 
         <div className="mt-4 rounded-xl border border-dashed border-[var(--ink-soft)]/25 bg-white/55 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -399,7 +410,7 @@ export function GeneratePanel() {
             disabled={busy}
             onClick={() => void generateFromReference()}
           >
-            {busy ? "基于参考图生成中…" : "基于参考图生成封面"}
+            {busy ? "生成中…" : "基于提示词 + 参考图生成"}
           </Button>
           {genError ? (
             <p className="mt-2 text-sm text-[var(--coral)]" role="alert">
@@ -408,29 +419,15 @@ export function GeneratePanel() {
           ) : null}
         </div>
 
-        <div className="mt-3 space-y-2">
-          <Label htmlFor="pkey">Pollinations API Key（可选）</Label>
-          <Input
-            id="pkey"
-            value={apiKey}
-            onChange={(e) => {
-              setApiKey(e.target.value);
-              localStorage.setItem("pollinations-key", e.target.value);
-            }}
-            className="bg-white/80"
-            placeholder="可留空；上传图生图若失败再填"
-          />
-        </div>
-
         <div className="mt-4 overflow-hidden rounded-xl bg-white/70">
           {busy ? (
             <div className="px-4 py-16 text-center text-sm text-[var(--ink-soft)]">
-              正在按参考图生成，请稍候…
+              正在生成，请稍候…
             </div>
           ) : imgError ? (
             <div className="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-[var(--ink-soft)]">
               <ImageIcon className="size-8 opacity-50" />
-              <p>图片加载失败（免费接口可能限流）。可换一张，或改用备用线路。</p>
+              <p>图片加载失败（免费接口可能限流）。可改提示词后换一张，或切换备用线路。</p>
               <Button
                 type="button"
                 size="sm"
