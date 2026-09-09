@@ -98,7 +98,18 @@ export function GeneratePanel() {
     }, 50);
   }
 
-  const activePrompt = coverPrompt.trim();
+  const autoCoverPrompt = useMemo(() => {
+    if (!post || !note) return "";
+    return [
+      "Xiaohongshu vertical cover 3:4",
+      `title: ${note.titles[titleIndex] ?? post.titleHint}`,
+      `theme: ${post.angle}`,
+      `body cues: ${note.body.replace(/\s+/g, " ").slice(0, 160)}`,
+      "warm paper tones, coral accent, realistic lifestyle photo, no text overlay, no watermark",
+    ].join(", ");
+  }, [post, note, titleIndex]);
+
+  const activePrompt = coverPrompt.trim() || autoCoverPrompt;
 
   const textCoverUrl = useMemo(() => {
     if (!post) return "";
@@ -136,8 +147,9 @@ export function GeneratePanel() {
     setGenError(null);
     setImgError(false);
 
-    if (!activePrompt) {
-      setGenError("请先填写图片提示词");
+    const promptToUse = coverPrompt.trim() || autoCoverPrompt;
+    if (!promptToUse) {
+      setGenError("请先生成正文，或填写提示词 / 上传参考图");
       return;
     }
 
@@ -147,7 +159,7 @@ export function GeneratePanel() {
       try {
         const url = await editCoverFromFile(post, refFile, {
           seed: seed || Date.now() % 100000,
-          prompt: activePrompt,
+          prompt: promptToUse,
         });
         if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
         setResultUrl(url);
@@ -167,7 +179,7 @@ export function GeneratePanel() {
       return;
     }
 
-    // Prompt only — image not required
+    // Prompt empty + no image → use title/body auto prompt
     setMode("text");
     setResultUrl(null);
     setSeed((s) => s + 1 || Date.now() % 100000);
@@ -323,18 +335,27 @@ export function GeneratePanel() {
 
         <div className="space-y-2 rounded-xl border border-[var(--coral)]/25 bg-[var(--coral)]/5 p-4">
           <Label htmlFor="cover-prompt" className="text-sm font-medium text-[var(--ink)]">
-            图片提示词（必填）
+            图片提示词（可选）
           </Label>
           <Textarea
             id="cover-prompt"
             value={coverPrompt}
             onChange={(e) => setCoverPrompt(e.target.value)}
             className="min-h-32 bg-white"
-            placeholder="描述封面画面，例如：37岁女性通勤侧影，暖色纸感，竖版小红书封面，不要文字…"
+            placeholder="可留空。留空时将根据当前标题和正文自动匹配生成封面…"
           />
           <p className="text-xs text-[var(--ink-soft)]">
-            每次生成都会用这里的提示词。参考图可加可不加。
+            提示词和参考图都可空。都空时，按标题 + 正文内容自动生成匹配图片。
           </p>
+          {!coverPrompt.trim() ? (
+            <p className="text-xs text-[var(--ink-soft)]">
+              当前将使用自动提示词：
+              <span className="mt-1 block rounded-md bg-white/80 px-2 py-1.5 text-[11px] leading-5 text-[var(--ink)]">
+                {autoCoverPrompt.slice(0, 180)}
+                {autoCoverPrompt.length > 180 ? "…" : ""}
+              </span>
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-4 rounded-xl border border-dashed border-[var(--ink-soft)]/25 bg-white/55 p-4">
@@ -413,8 +434,12 @@ export function GeneratePanel() {
           {busy
             ? "生成中…"
             : refFile || refUrl.trim()
-              ? "用提示词 + 参考图生成封面"
-              : "用提示词生成封面"}
+              ? coverPrompt.trim()
+                ? "用提示词 + 参考图生成封面"
+                : "用正文匹配提示 + 参考图生成封面"
+              : coverPrompt.trim()
+                ? "用提示词生成封面"
+                : "按标题和正文生成封面"}
         </Button>
         {genError ? (
           <p className="mt-2 text-sm text-[var(--coral)]" role="alert">
