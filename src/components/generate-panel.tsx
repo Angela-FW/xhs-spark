@@ -73,7 +73,7 @@ export function GeneratePanel() {
     setJustGenerated(false);
     if (post) {
       setNote(generateNoteFromPost(post, ""));
-      setCoverPrompt(buildCoverPrompt(post));
+      setCoverPrompt("");
     } else {
       setNote(null);
       setCoverPrompt("");
@@ -431,15 +431,7 @@ export function GeneratePanel() {
           disabled={busy}
           onClick={() => void generateCover()}
         >
-          {busy
-            ? "生成中…"
-            : refFile || refUrl.trim()
-              ? coverPrompt.trim()
-                ? "用提示词 + 参考图生成封面"
-                : "用正文匹配提示 + 参考图生成封面"
-              : coverPrompt.trim()
-                ? "用提示词生成封面"
-                : "按标题和正文生成封面"}
+          {busy ? "生成中…" : "生成封面"}
         </Button>
         {genError ? (
           <p className="mt-2 text-sm text-[var(--coral)]" role="alert">
