@@ -478,11 +478,6 @@ export function GeneratePanel() {
             />
           )}
         </div>
-        <ul className="mt-3 space-y-1 text-xs text-[var(--ink-soft)]">
-          {note.coverIdeas.map((idea) => (
-            <li key={idea}>· {idea}</li>
-          ))}
-        </ul>
       </div>
     </div>
   );

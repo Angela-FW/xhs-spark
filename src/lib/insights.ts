@@ -19,14 +19,140 @@ export function routePillar(text: string): PillarId {
   return scores[0].id;
 }
 
-function polishLine(raw: string): string {
-  let t = raw.trim().replace(/\s+/g, " ");
-  t = t.replace(/^(我觉得|我感觉|其实|真的是|就是)/, "");
-  if (!/[。！？]$/.test(t)) t += "。";
-  // Soften chicken-soup openers
-  t = t.replace(/一定要加油/g, "先把下一步做清楚");
-  t = t.replace(/相信自己/g, "把证据写进经历里");
-  return t;
+/** Split Chinese prose into clause-ish pieces. */
+function splitClauses(text: string): string[] {
+  return text
+    .split(/[，,；;。！？\n]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2);
+}
+
+function softenFiller(s: string): string {
+  return s
+    .replace(/^(我觉得|我感觉|其实|真的是|就是|然后就|然后)/, "")
+    .replace(/一定要加油/g, "先把下一步做清楚")
+    .replace(/相信自己/g, "把证据写进经历里")
+    .replace(/非常非常/g, "挺")
+    .replace(/真的很/g, "很")
+    .replace(/已经渐渐/g, "渐渐")
+    .replace(/已经是/g, "是")
+    .replace(/经过了最近/g, "最近这")
+    .trim();
+}
+
+/**
+ * Real rewrite for Xiaohongshu voice: keep facts, change rhythm and wording.
+ * Always returns text different from raw when raw has enough content.
+ */
+export function polishLine(raw: string, pillar: PillarId = "resume"): string {
+  const cleaned = raw.trim().replace(/\s+/g, " ");
+  if (!cleaned) return cleaned;
+
+  const clauses = splitClauses(cleaned).map(softenFiller).filter(Boolean);
+  if (!clauses.length) return ensurePeriod(softenFiller(cleaned));
+
+  // Pattern: day count / adaptation / routine (user's example class)
+  const dayHit = cleaned.match(/第\s*(\d+)\s*天/);
+  const adaptHit = /适应|习惯|渐渐/.test(cleaned);
+  const seaHit = /石沉大海|已读不回|没回音|石沉/.test(cleaned);
+
+  let polished = "";
+
+  if (dayHit && (adaptHit || seaHit || /投简历|面试|日常/.test(cleaned))) {
+    const day = dayHit[1];
+    const rest = clauses
+      .filter((c) => !/第\s*\d+\s*天/.test(c))
+      .map((c) =>
+        c
+          .replace(/渐渐适应了/, "")
+          .replace(/已经渐渐适应了/, "")
+          .replace(/适应了/, "")
+          .trim(),
+      )
+      .filter(Boolean);
+
+    const scene = rest[0] ? `前些天还在硬扛：${rest[0]}。` : "";
+    const now =
+      rest.length > 1
+        ? `这几天终于摸到一点节奏——${rest.slice(1).join("，")}，居然开始变成日常。`
+        : rest[0]
+          ? `这几天居然开始把「${rest[0]}」当成日常。`
+          : "这几天居然开始摸到一点节奏。";
+
+    polished = `投递第${day}天了。${scene}${now}`.replace(/。。/g, "。");
+  } else if (pillar === "life") {
+    const head = clauses[0];
+    const tail = clauses.slice(1).join("，");
+    polished = tail
+      ? `${ensurePeriod(head)}说小也不小：${tail}。求职之外，这些事让人还像个活人。`
+      : `${ensurePeriod(head)}求职之外，我仍把日子过出一点形状。`;
+  } else if (pillar === "rejection" || seaHit) {
+    const head = clauses[0];
+    const mid = clauses.slice(1, -1).join("，");
+    const end = clauses[clauses.length - 1];
+    polished = mid
+      ? `${ensurePeriod(head)}${mid}。我允许自己难受一小会儿，然后只改一个变量继续。`
+      : `${ensurePeriod(head)}难受可以，但我不拿一次结果否定整个人。下一步只改一件事：${end}。`;
+  } else if (pillar === "interview") {
+    polished = `${ensurePeriod(clauses[0])}现场我记的不是输赢，是哪一句没说清。复盘就三步：哪里卡、怎么改、下次开口第一句是什么。${
+      clauses.length > 1 ? clauses.slice(1).join("，") + "。" : ""
+    }`;
+  } else if (pillar === "age-edu") {
+    polished = `${ensurePeriod(clauses[0])}标签我会听见，但不跟它吵架。我改成给证据：能验证的经历、能交付的结果。${
+      clauses.length > 1 ? "具体是：" + clauses.slice(1).join("，") + "。" : ""
+    }`;
+  } else {
+    // Generic job/restart rewrite: hook + concrete + soft close
+    const hook = clauses[0];
+    const body = clauses.slice(1, -1);
+    const last = clauses.length > 1 ? clauses[clauses.length - 1] : "";
+    const bodyText = body.length ? body.join("，") + "。" : "";
+    polished = `${ensurePeriod(hook)}${bodyText}${
+      last
+        ? `落到动作上：${last.replace(/^(我|就)/, "")}。`
+        : "我不急着证明自己，先把下一步做清楚。"
+    }`;
+  }
+
+  polished = polished
+    .replace(/\s+/g, "")
+    .replace(/，+/g, "，")
+    .replace(/。+/g, "。")
+    .replace(/，。/g, "。")
+    .replace(/^，/, "");
+
+  if (!/[。！？]$/.test(polished)) polished += "。";
+
+  // Guarantee visible difference from raw
+  if (normalizeCmp(polished) === normalizeCmp(cleaned)) {
+    polished = rewriteFallback(cleaned, pillar);
+  }
+
+  return polished;
+}
+
+function normalizeCmp(s: string): string {
+  return s.replace(/[。！？，,\s]/g, "");
+}
+
+function ensurePeriod(s: string): string {
+  const t = s.trim();
+  if (!t) return t;
+  return /[。！？]$/.test(t) ? t : `${t}。`;
+}
+
+function rewriteFallback(raw: string, pillar: PillarId): string {
+  const short = raw.length > 42 ? `${raw.slice(0, 42)}…` : raw;
+  const closers: Record<PillarId, string> = {
+    restart: "我不写成鸡汤，只保留这一周真实发生的动作。",
+    "age-edu": "标签可以听见，证据更要写清楚。",
+    resume: "下一步我只改简历/投递里的一个变量。",
+    interview: "下次开口，我先把最硬的一句证据放前面。",
+    rejection: "难过计时结束，我就回去改渠道或表达，不改自尊。",
+    choice: "决定前我先把非情绪清单过一遍。",
+    life: "求职之外，我仍把日子留一点给自己。",
+  };
+  return `记一笔：${ensurePeriod(short)}${closers[pillar]}`;
 }
 
 function needsDesensitize(text: string): string | undefined {
@@ -41,20 +167,24 @@ function needsDesensitize(text: string): string | undefined {
 
 export function processInsights(rawBlob: string): InsightCard[] {
   const chunks = rawBlob
-    .split(/\n{2,}|\n(?=[-•·]|\d+[.、])|(?<=[。！？])\s*(?=[^\s])/u)
+    .split(/\n{2,}|\n(?=[-•·]|\d+[.、])/u)
     .map((s) => s.replace(/^[-•·\d.、\s]+/, "").trim())
     .filter((s) => s.length >= 8);
 
+  // Prefer whole paragraphs; if user pasted one block, keep as one insight
+  const source =
+    chunks.length > 1
+      ? chunks
+      : [rawBlob.trim()].filter((s) => s.length >= 8);
+
   const unique: string[] = [];
-  for (const c of chunks) {
-    if (!unique.some((u) => u.slice(0, 20) === c.slice(0, 20))) unique.push(c);
+  for (const c of source) {
+    if (!unique.some((u) => u.slice(0, 24) === c.slice(0, 24))) unique.push(c);
   }
 
-  const source = unique.length ? unique : [rawBlob.trim()].filter(Boolean);
-
-  return source.slice(0, 12).map((raw) => {
+  return unique.slice(0, 12).map((raw) => {
     const pillar = routePillar(raw);
-    const polished = polishLine(raw);
+    const polished = polishLine(raw, pillar);
     return {
       id: uid("ins"),
       raw,
