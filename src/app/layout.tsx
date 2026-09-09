@@ -21,9 +21,9 @@ const brand = ZCOOL_XiaoWei({
 });
 
 export const metadata: Metadata = {
-  title: "爆文工坊 · 小红书爆款文案",
+  title: "重启笔记 · 求职内容规划与文案",
   description:
-    "按主题、风格与人设，一键生成小红书爆款标题、正文、话题标签与封面思路。",
+    "37岁双非离职重启人设：一年内容日历、感悟路由、反馈/对话校准、小红书文案与免费封面生图。",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
