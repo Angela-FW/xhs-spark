@@ -117,15 +117,30 @@ export function createInitialState(): AppState {
 }
 
 export function loadState(): AppState {
-  if (typeof window === "undefined") return createInitialState();
+  const fallback = createInitialState();
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createInitialState();
-    const parsed = JSON.parse(raw) as AppState;
-    if (parsed.version !== 1 || !parsed.posts?.length) return createInitialState();
-    return parsed;
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<AppState>;
+    if (parsed.version !== 1 || !parsed.posts?.length) return fallback;
+    return {
+      ...fallback,
+      ...parsed,
+      version: 1,
+      calendarStart: parsed.calendarStart || fallback.calendarStart,
+      posts: parsed.posts,
+      weekMeta: parsed.weekMeta?.length ? parsed.weekMeta : fallback.weekMeta,
+      insights: parsed.insights ?? [],
+      feedback: parsed.feedback ?? [],
+      weights: { ...fallback.weights, ...(parsed.weights ?? {}) },
+      pending: parsed.pending ?? null,
+      snapshots: parsed.snapshots ?? [],
+      chat: parsed.chat?.length ? parsed.chat : fallback.chat,
+      selectedPostId: parsed.selectedPostId ?? fallback.selectedPostId,
+    };
   } catch {
-    return createInitialState();
+    return fallback;
   }
 }
 
