@@ -35,7 +35,7 @@ export function InsightInbox() {
       <div className="studio-shell rounded-2xl p-5">
         <h3 className="font-display text-lg text-[var(--ink)]">感悟收件箱</h3>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          不定期粘贴零散想法。我会拆条、润色，并按关键词推荐到日历支柱与未来文章。
+          不定期粘贴零散想法。我会拆条，按小红书爆款文风润色，并推荐到近期更相关的笔记。
         </p>
         <div className="mt-4 space-y-2">
           <Label htmlFor="insight-raw">近期感悟</Label>
@@ -82,7 +82,9 @@ export function InsightInbox() {
                   ) : null}
                 </div>
                 <p className="mt-2 text-sm text-[var(--ink-soft)]">原话：{insight.raw}</p>
-                <p className="mt-2 text-sm text-[var(--ink)]">润色：{insight.polished}</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink)]">
+                  润色：{insight.polished}
+                </p>
                 <div className="mt-3 space-y-2">
                   <p className="text-xs font-medium text-[var(--ink)]">推荐挂到</p>
                   {recs.map(({ post, reason }) => (
