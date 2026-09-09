@@ -24,6 +24,17 @@ export const metadata: Metadata = {
   title: "重启笔记 · 求职内容规划与文案",
   description:
     "37岁双非离职重启人设：一年内容日历、感悟路由、反馈/对话校准、小红书文案与免费封面生图。",
+  applicationName: "重启笔记",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "32x32" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icon-192.png", sizes: "192x192" }],
+  },
+  themeColor: "#C45C48",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

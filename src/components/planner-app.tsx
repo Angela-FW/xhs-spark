@@ -78,6 +78,19 @@ function PlannerInner() {
             <Button
               type="button"
               size="sm"
+              variant="outline"
+              onClick={() => {
+                const a = document.createElement("a");
+                a.href = "/app-icon.png";
+                a.download = "重启笔记图标.png";
+                a.click();
+              }}
+            >
+              下载桌面图标
+            </Button>
+            <Button
+              type="button"
+              size="sm"
               variant="ghost"
               onClick={() => {
                 if (confirm("确定清空本地规划并恢复种子日历？")) resetAll();

@@ -87,11 +87,26 @@ export function GeneratePanel() {
     };
   }, [refPreview, resultUrl]);
 
+  const selectedTitle =
+    note?.titles[titleIndex] ?? note?.titles[0] ?? post?.titleHint ?? "";
+
+  function updateTitle(index: number, value: string) {
+    setNote((prev) => {
+      if (!prev) return prev;
+      const titles = prev.titles.map((t, i) => (i === index ? value : t));
+      return { ...prev, titles };
+    });
+    setTitleIndex(index);
+  }
+
   function runGenerateCopy() {
     if (!post) return;
-    const next = generateNoteFromPost(post, draftExtra);
-    setNote(next);
-    setTitleIndex(0);
+    const next = generateNoteFromPost(post, draftExtra, selectedTitle);
+    setNote((prev) => ({
+      ...next,
+      // Keep previously chosen / edited titles across body regenerations
+      titles: prev?.titles?.length ? prev.titles : next.titles,
+    }));
     setJustGenerated(true);
     window.setTimeout(() => {
       bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -102,12 +117,12 @@ export function GeneratePanel() {
     if (!post || !note) return "";
     return [
       "Xiaohongshu vertical cover 3:4",
-      `title: ${note.titles[titleIndex] ?? post.titleHint}`,
+      `title: ${selectedTitle || post.titleHint}`,
       `theme: ${post.angle}`,
       `body cues: ${note.body.replace(/\s+/g, " ").slice(0, 160)}`,
       "warm paper tones, coral accent, realistic lifestyle photo, no text overlay, no watermark",
     ].join(", ");
-  }, [post, note, titleIndex]);
+  }, [post, note, selectedTitle]);
 
   const activePrompt = coverPrompt.trim() || autoCoverPrompt;
 
@@ -258,31 +273,49 @@ export function GeneratePanel() {
         </Button>
       </div>
 
-      <div ref={bodyRef} className="studio-shell rounded-2xl p-5">
+      <div className="studio-shell rounded-2xl p-5">
         <div className="mb-3 flex items-center justify-between gap-2">
-          <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
+          <div>
+            <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
+            <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+              点选一条作为当前标题；也可直接改字。重新生成正文会记住你的选择。
+            </p>
+          </div>
           <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
         </div>
         <ul className="space-y-2">
           {note.titles.map((t, i) => (
-            <li key={t}>
-              <button
-                type="button"
-                onClick={() => setTitleIndex(i)}
-                className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm ${
+            <li key={i}>
+              <div
+                className={`flex items-center gap-2 rounded-xl border px-2 py-2 ${
                   titleIndex === i
                     ? "border-[var(--coral)] bg-[var(--coral)]/8"
                     : "border-transparent bg-white/60"
                 }`}
               >
-                {t}
-              </button>
+                <button
+                  type="button"
+                  aria-label={`选用标题 ${i + 1}`}
+                  onClick={() => setTitleIndex(i)}
+                  className={`size-4 shrink-0 rounded-full border ${
+                    titleIndex === i
+                      ? "border-[var(--coral)] bg-[var(--coral)]"
+                      : "border-[var(--ink-soft)]/40 bg-white"
+                  }`}
+                />
+                <Input
+                  value={t}
+                  onFocus={() => setTitleIndex(i)}
+                  onChange={(e) => updateTitle(i, e.target.value)}
+                  className="border-0 bg-transparent shadow-none focus-visible:ring-0"
+                />
+              </div>
             </li>
           ))}
         </ul>
       </div>
 
-      <div className="studio-shell rounded-2xl p-5">
+      <div ref={bodyRef} className="studio-shell rounded-2xl p-5">
         <div className="mb-3 flex items-center justify-between">
           <h4 className="font-display text-base text-[var(--ink)]">
             正文（可直接复制发笔记）

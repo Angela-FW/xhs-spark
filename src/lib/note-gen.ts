@@ -19,7 +19,11 @@ function materialParagraphs(post: CalendarPost, extraNote: string): string[] {
   return lines;
 }
 
-function buildBody(post: CalendarPost, extraNote: string): string {
+function buildBody(
+  post: CalendarPost,
+  extraNote: string,
+  titleHook = post.titleHint,
+): string {
   const bits = materialParagraphs(post, extraNote);
   const trust = post.trustAnchor
     ? `顺便说一句：${post.trustAnchor}。`
@@ -34,7 +38,7 @@ function buildBody(post: CalendarPost, extraNote: string): string {
           `3. 复查标准：能向别人用一分钟讲明白，并且留下可验证记录。`,
         ].join("\n");
 
-    return `先说结论：关于「${post.titleHint}」，我这周只抓住一件事——${post.angle}。
+    return `先说结论：关于「${titleHook}」，我这周只抓住一件事——${post.angle}。
 
 ${trust}
 
@@ -51,7 +55,7 @@ ${steps}
       ? bits.map((b) => b).join("\n\n")
       : `那天情绪上来的时候，我没有逼自己立刻「正面思考」。我只做了两件事：把感受写下来，然后规定自己难过到某个点必须停，去干下一件具体的小事。`;
 
-    return `今天不想扮冷静。关于「${post.titleHint}」，我想把真实感受写清楚。
+    return `今天不想扮冷静。关于「${titleHook}」，我想把真实感受写清楚。
 
 ${trust}
 
@@ -67,7 +71,7 @@ ${mid}
   // story
   const scene = bits[0]
     ? bits[0]
-    : `那天我对着「${post.titleHint}」这件事停了很久。不是戏剧化的崩溃，是普通的停顿——停完，还是得继续。`;
+    : `那天我对着「${titleHook}」这件事停了很久。不是戏剧化的崩溃，是普通的停顿——停完，还是得继续。`;
   const action = bits[1]
     ? bits[1]
     : `然后我做了具体动作：围绕「${post.angle}」，只推进能在当天完成的一小步，并记下来。`;
@@ -89,6 +93,7 @@ ${reflect}
 export function generateNoteFromPost(
   post: CalendarPost,
   extraNote = "",
+  selectedTitle?: string,
 ): GeneratedNote {
   const titles = [
     post.titleHint,
@@ -117,14 +122,16 @@ export function generateNoteFromPost(
     "前后对比：混乱日程 vs 结构化小步",
   ];
 
+  const titleForBody = selectedTitle?.trim() || post.titleHint;
+
   return {
     titles,
-    body: buildBody(post, extraNote),
+    body: buildBody(post, extraNote, titleForBody),
     tags,
     coverIdeas,
     coverPrompt: [
       "Xiaohongshu vertical cover",
-      post.titleHint,
+      titleForBody,
       pillarLabel(post.pillar),
       "warm paper coral accent, no text in image",
     ].join(", "),
