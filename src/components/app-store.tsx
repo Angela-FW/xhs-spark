@@ -30,6 +30,7 @@ type StoreApi = {
   ready: boolean;
   setSelectedPostId: (id: string | null) => void;
   addInsights: (cards: InsightCard[]) => void;
+  deleteInsight: (insightId: string) => void;
   assignInsight: (insightId: string, postId: string) => void;
   setPostStatus: (
     postId: string,
@@ -82,6 +83,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const addInsights = useCallback((cards: InsightCard[]) => {
     setState((s) => ({ ...s, insights: [...cards, ...s.insights] }));
+  }, []);
+
+  const deleteInsight = useCallback((insightId: string) => {
+    setState((s) => ({
+      ...s,
+      insights: s.insights.filter((i) => i.id !== insightId),
+    }));
   }, []);
 
   const assignInsight = useCallback((insightId: string, postId: string) => {
@@ -184,6 +192,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       ready: hydrated,
       setSelectedPostId,
       addInsights,
+      deleteInsight,
       assignInsight,
       setPostStatus,
       submitFeedback,
@@ -201,6 +210,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       hydrated,
       setSelectedPostId,
       addInsights,
+      deleteInsight,
       assignInsight,
       setPostStatus,
       submitFeedback,

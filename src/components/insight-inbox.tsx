@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
 import { processInsights, recommendPostsForInsight } from "@/lib/insights";
 import { pillarLabel } from "@/lib/persona";
@@ -9,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
 export function InsightInbox() {
-  const { state, addInsights, assignInsight } = useAppStore();
+  const { state, addInsights, deleteInsight, assignInsight } = useAppStore();
   const [raw, setRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +81,20 @@ export function InsightInbox() {
                   {insight.desensitizeNote ? (
                     <span className="text-amber-700">{insight.desensitizeNote}</span>
                   ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="ml-auto text-[var(--ink-soft)] hover:text-[var(--coral)]"
+                    onClick={() => {
+                      if (confirm("确定删除这条感悟？")) {
+                        deleteInsight(insight.id);
+                      }
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                    删除
+                  </Button>
                 </div>
                 <p className="mt-2 text-sm text-[var(--ink-soft)]">原话：{insight.raw}</p>
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--ink)]">
