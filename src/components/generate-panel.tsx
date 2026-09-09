@@ -131,17 +131,23 @@ export function GeneratePanel() {
     setMode("ref");
   }
 
-  async function generateFromReference() {
+  async function generateCover() {
     if (!post) return;
     setGenError(null);
     setImgError(false);
 
+    if (!activePrompt) {
+      setGenError("请先填写图片提示词");
+      return;
+    }
+
+    // With reference image → img2img
     if (refFile) {
       setBusy(true);
       try {
         const url = await editCoverFromFile(post, refFile, {
           seed: seed || Date.now() % 100000,
-          prompt: activePrompt || undefined,
+          prompt: activePrompt,
         });
         if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
         setResultUrl(url);
@@ -161,17 +167,8 @@ export function GeneratePanel() {
       return;
     }
 
-    setGenError("请先上传一张参考图，或填写可公网访问的图片链接");
-  }
-
-  function generateFromPromptOnly() {
-    if (!activePrompt) {
-      setGenError("请先填写提示词");
-      return;
-    }
-    setGenError(null);
+    // Prompt only — image not required
     setMode("text");
-    setImgError(false);
     setResultUrl(null);
     setSeed((s) => s + 1 || Date.now() % 100000);
   }
@@ -306,46 +303,48 @@ export function GeneratePanel() {
             <Button
               type="button"
               size="sm"
-              className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-              onClick={generateFromPromptOnly}
-            >
-              按提示词生图
-            </Button>
-            <Button
-              type="button"
-              size="sm"
               variant="outline"
               onClick={() => {
                 setSeed((s) => s + 1 || Date.now() % 100000);
                 setImgError(false);
-                if (mode === "ref" && refFile) void generateFromReference();
+                setResultUrl(null);
+                if (refFile || refUrl.trim()) void generateCover();
               }}
             >
               <RefreshCw className="size-3.5" />
               换一张
             </Button>
-            <CopyBtn text={activePrompt || buildCoverPrompt(post)} label="复制提示词" />
+            <CopyBtn
+              text={activePrompt || buildCoverPrompt(post)}
+              label="复制提示词"
+            />
           </div>
         </div>
 
-        <p className="text-xs text-[var(--ink-soft)]">
-          可改提示词后生图；也可上传参考图，用「提示词 + 图片」一起生成新封面。免费接口可能限流。
-        </p>
-
-        <div className="mt-4 space-y-2">
-          <Label htmlFor="cover-prompt">提示词</Label>
+        <div className="space-y-2 rounded-xl border border-[var(--coral)]/25 bg-[var(--coral)]/5 p-4">
+          <Label htmlFor="cover-prompt" className="text-sm font-medium text-[var(--ink)]">
+            图片提示词（必填）
+          </Label>
           <Textarea
             id="cover-prompt"
             value={coverPrompt}
             onChange={(e) => setCoverPrompt(e.target.value)}
-            className="min-h-28 bg-white/80"
-            placeholder="描述你想要的封面画面、风格、人物、场景…"
+            className="min-h-32 bg-white"
+            placeholder="描述封面画面，例如：37岁女性通勤侧影，暖色纸感，竖版小红书封面，不要文字…"
           />
+          <p className="text-xs text-[var(--ink-soft)]">
+            每次生成都会用这里的提示词。参考图可加可不加。
+          </p>
         </div>
 
         <div className="mt-4 rounded-xl border border-dashed border-[var(--ink-soft)]/25 bg-white/55 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-[var(--ink)]">参考图（可选）</p>
+            <div>
+              <p className="text-sm font-medium text-[var(--ink)]">参考图（可选）</p>
+              <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                不上传也能生成；上传后会按「提示词 + 图片」一起出图
+              </p>
+            </div>
             <div className="flex gap-2">
               <Button
                 type="button"
@@ -391,7 +390,7 @@ export function GeneratePanel() {
           ) : null}
 
           <div className="mt-3 space-y-2">
-            <Label htmlFor="refurl">或填写公网图片链接</Label>
+            <Label htmlFor="refurl">或填写公网图片链接（可选）</Label>
             <Input
               id="refurl"
               value={refUrl}
@@ -400,24 +399,28 @@ export function GeneratePanel() {
                 if (e.target.value.trim()) setMode("ref");
               }}
               className="bg-white/80"
-              placeholder="https://…（可选，与上传二选一即可）"
+              placeholder="https://…"
             />
           </div>
-
-          <Button
-            type="button"
-            className="mt-3 bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-            disabled={busy}
-            onClick={() => void generateFromReference()}
-          >
-            {busy ? "生成中…" : "基于提示词 + 参考图生成"}
-          </Button>
-          {genError ? (
-            <p className="mt-2 text-sm text-[var(--coral)]" role="alert">
-              {genError}
-            </p>
-          ) : null}
         </div>
+
+        <Button
+          type="button"
+          className="mt-4 h-11 w-full bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)] sm:w-auto sm:px-8"
+          disabled={busy}
+          onClick={() => void generateCover()}
+        >
+          {busy
+            ? "生成中…"
+            : refFile || refUrl.trim()
+              ? "用提示词 + 参考图生成封面"
+              : "用提示词生成封面"}
+        </Button>
+        {genError ? (
+          <p className="mt-2 text-sm text-[var(--coral)]" role="alert">
+            {genError}
+          </p>
+        ) : null}
 
         <div className="mt-4 overflow-hidden rounded-xl bg-white/70">
           {busy ? (
@@ -427,7 +430,7 @@ export function GeneratePanel() {
           ) : imgError ? (
             <div className="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-[var(--ink-soft)]">
               <ImageIcon className="size-8 opacity-50" />
-              <p>图片加载失败（免费接口可能限流）。可改提示词后换一张，或切换备用线路。</p>
+              <p>图片加载失败（免费接口可能限流）。可改提示词后重试，或切换备用线路。</p>
               <Button
                 type="button"
                 size="sm"
