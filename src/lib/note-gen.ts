@@ -9,6 +9,55 @@ export type GeneratedNote = {
   coverPrompt: string;
 };
 
+const TITLE_OPENERS = [
+  "别急着自我否定",
+  "我这周终于想明白",
+  "不是鸡汤，是实操",
+  "我把复杂问题拆小了",
+  "给正在找工作的你",
+];
+
+const TITLE_ENDINGS = [
+  "先把这一步做完",
+  "比盲投有效很多",
+  "情绪稳住后就有解",
+  "这一条真的能落地",
+  "今天就能开始做",
+];
+
+function hashSeed(input: string): number {
+  let h = 0;
+  for (let i = 0; i < input.length; i++) h = (h * 131 + input.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function pick(list: string[], offset: number): string {
+  return list[offset % list.length];
+}
+
+export function generateTitleCandidates(
+  post: CalendarPost,
+  seed = 0,
+  selectedTitle?: string,
+): string[] {
+  const baseSeed = hashSeed(`${post.id}:${post.titleHint}:${seed}`);
+  const opener = pick(TITLE_OPENERS, baseSeed);
+  const ending = pick(TITLE_ENDINGS, baseSeed >> 3);
+  const formatWord =
+    post.format === "tips" ? "干货" : post.format === "emotion" ? "真心话" : "记录";
+  const fallbackTitles = [
+    `${opener}｜${post.titleHint}`,
+    `${pillarLabel(post.pillar)}｜${post.hooks[0] ?? "真实记录"}`,
+    `37岁双非求职｜${post.angle.slice(0, 16)}`,
+    `${formatWord}｜${post.hooks[1] ?? ending}`,
+    `写给同样在找工作的人｜${ending}`,
+  ];
+
+  const pinned = selectedTitle?.trim();
+  if (!pinned) return fallbackTitles;
+  return [pinned, ...fallbackTitles.filter((t) => t !== pinned)].slice(0, 5);
+}
+
 function materialParagraphs(post: CalendarPost, extraNote: string): string[] {
   const fromMats = post.materials.map((m) => m.polished).filter(Boolean);
   const lines: string[] = [];
@@ -95,13 +144,7 @@ export function generateNoteFromPost(
   extraNote = "",
   selectedTitle?: string,
 ): GeneratedNote {
-  const titles = [
-    post.titleHint,
-    `${pillarLabel(post.pillar)}｜${post.hooks[0] ?? "真实记录"}`,
-    `37岁双非｜${post.titleHint.replace(/^.*?｜/, "").slice(0, 20)}`,
-    `${post.format === "tips" ? "干货" : post.format === "emotion" ? "说实话" : "记录"}｜${post.hooks[1] ?? post.angle.slice(0, 12)}`,
-    `写给同样在找工作的人｜${pillarLabel(post.pillar)}`,
-  ];
+  const titles = generateTitleCandidates(post, 0, selectedTitle);
 
   const tags = [
     "#求职",

@@ -5,6 +5,7 @@ import { Check, Copy, ImageIcon, RefreshCw, Sparkles, Upload, X } from "lucide-r
 import { useAppStore } from "@/components/app-store";
 import {
   generateNoteFromPost,
+  generateTitleCandidates,
   formatFullNote,
   type GeneratedNote,
 } from "@/lib/note-gen";
@@ -46,6 +47,7 @@ export function GeneratePanel() {
   const [draftExtra, setDraftExtra] = useState("");
   const [note, setNote] = useState<GeneratedNote | null>(null);
   const [titleIndex, setTitleIndex] = useState(0);
+  const [titleSeed, setTitleSeed] = useState(0);
   const [seed, setSeed] = useState(0);
   const [imgError, setImgError] = useState(false);
   const [useAlt, setUseAlt] = useState(false);
@@ -63,6 +65,7 @@ export function GeneratePanel() {
 
   useEffect(() => {
     setTitleIndex(0);
+    setTitleSeed(0);
     setImgError(false);
     setUseAlt(false);
     setSeed(0);
@@ -111,6 +114,20 @@ export function GeneratePanel() {
     window.setTimeout(() => {
       bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
+  }
+
+  function regenerateTitles() {
+    if (!post) return;
+    setTitleSeed((prevSeed) => {
+      const nextSeed = prevSeed + 1;
+      setNote((prev) => {
+        if (!prev) return prev;
+        const titles = generateTitleCandidates(post, nextSeed, selectedTitle);
+        return { ...prev, titles };
+      });
+      setTitleIndex(0);
+      return nextSeed;
+    });
   }
 
   const autoCoverPrompt = useMemo(() => {
@@ -281,7 +298,13 @@ export function GeneratePanel() {
               点选一条作为当前标题；也可直接改字。重新生成正文会记住你的选择。
             </p>
           </div>
-          <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
+          <div className="flex items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={regenerateTitles}>
+              <RefreshCw className="size-3.5" />
+              重新生成标题
+            </Button>
+            <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
+          </div>
         </div>
         <ul className="space-y-2">
           {note.titles.map((t, i) => (
