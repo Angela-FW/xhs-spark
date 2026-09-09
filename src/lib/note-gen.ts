@@ -9,52 +9,94 @@ export type GeneratedNote = {
   coverPrompt: string;
 };
 
+function materialParagraphs(post: CalendarPost, extraNote: string): string[] {
+  const fromMats = post.materials.map((m) => m.polished).filter(Boolean);
+  const lines: string[] = [];
+  if (extraNote.trim()) {
+    lines.push(extraNote.trim());
+  }
+  for (const m of fromMats.slice(0, 3)) lines.push(m);
+  return lines;
+}
+
+function buildBody(post: CalendarPost, extraNote: string): string {
+  const bits = materialParagraphs(post, extraNote);
+  const trust = post.trustAnchor
+    ? `顺便说一句：${post.trustAnchor}。`
+    : `${PERSONA.age}岁、${PERSONA.education}，我已经在找工作的路上了——这篇不装励志，只写清楚。`;
+
+  if (post.format === "tips") {
+    const steps = bits.length
+      ? bits.map((b, i) => `${i + 1}. ${b}`).join("\n")
+      : [
+          `1. 先把目标说清楚：这篇围绕「${post.angle}」。`,
+          `2. 我本周实际做了：把这件事拆成可检查的小步，每天只推进一格。`,
+          `3. 复查标准：能向别人用一分钟讲明白，并且留下可验证记录。`,
+        ].join("\n");
+
+    return `先说结论：关于「${post.titleHint}」，我这周只抓住一件事——${post.angle}。
+
+${trust}
+
+可以直接抄的做法：
+${steps}
+
+我踩过的坑：一上来写太满、想一次证明所有价值。后来我改成「一次只改一个变量」，反而更稳。
+
+如果你也卡在同类问题上，评论区丢一句你的卡点；我看到会回。`;
+  }
+
+  if (post.format === "emotion") {
+    const mid = bits.length
+      ? bits.map((b) => b).join("\n\n")
+      : `那天情绪上来的时候，我没有逼自己立刻「正面思考」。我只做了两件事：把感受写下来，然后规定自己难过到某个点必须停，去干下一件具体的小事。`;
+
+    return `今天不想扮冷静。关于「${post.titleHint}」，我想把真实感受写清楚。
+
+${trust}
+
+${mid}
+
+写到这里我仍会紧一下，但紧完之后我知道下一步是什么：回到${pillarLabel(post.pillar)}里那个可执行动作，而不是跟自己辩论对不对。
+
+角度我提醒自己：${post.angle}
+
+你要是也有过类似时刻，评论区可以只回一个字「同」，我就知道不是我一个人。`;
+  }
+
+  // story
+  const scene = bits[0]
+    ? bits[0]
+    : `那天我对着「${post.titleHint}」这件事停了很久。不是戏剧化的崩溃，是普通的停顿——停完，还是得继续。`;
+  const action = bits[1]
+    ? bits[1]
+    : `然后我做了具体动作：围绕「${post.angle}」，只推进能在当天完成的一小步，并记下来。`;
+  const reflect = bits[2]
+    ? bits[2]
+    : `复盘很短：有效的是把问题变小；无效的是反复刷新消息、期待一次证明自己。`;
+
+  return `${scene}
+
+${trust}
+
+${action}
+
+${reflect}
+
+我还在路上。这篇如果对你有一点用，评论区告诉我你这周卡在哪一步。`;
+}
+
 export function generateNoteFromPost(
   post: CalendarPost,
   extraNote = "",
 ): GeneratedNote {
-  const materials = post.materials.map((m) => m.polished).filter(Boolean);
-  const materialBlock = materials.length
-    ? materials.map((m, i) => `${i + 1}. ${m}`).join("\n")
-    : "1. 把本周真实发生的一件小事写清楚（时间/动作/结果）\n2. 承认一处不确定，再给一个下一步";
-
-  const trust = post.trustAnchor
-    ? `\n信任锚点（文中自然带一句）：${post.trustAnchor}`
-    : "";
-
   const titles = [
     post.titleHint,
     `${pillarLabel(post.pillar)}｜${post.hooks[0] ?? "真实记录"}`,
-    `37岁双非求职：${post.titleHint.replace(/^.*?｜/, "").slice(0, 18)}`,
-    `${post.format === "tips" ? "干货" : post.format === "emotion" ? "说实话" : "记录"}｜${post.angle.slice(0, 16)}`,
+    `37岁双非｜${post.titleHint.replace(/^.*?｜/, "").slice(0, 20)}`,
+    `${post.format === "tips" ? "干货" : post.format === "emotion" ? "说实话" : "记录"}｜${post.hooks[1] ?? post.angle.slice(0, 12)}`,
     `写给同样在找工作的人｜${pillarLabel(post.pillar)}`,
   ];
-
-  const opener =
-    post.format === "tips"
-      ? `先说结论：关于「${pillarLabel(post.pillar)}」，我这周只验证一件事——${post.angle}`
-      : post.format === "emotion"
-        ? `今天不想扮冷静。关于「${post.titleHint}」，我只想把真实感受写清楚。`
-        : `我已经在找工作的路上了。这篇不从头励志，只截取「${post.titleHint}」这一段。`;
-
-  const body = `${opener}
-
-人设背景（不必每次全写，可藏一句）：${PERSONA.age}岁，${PERSONA.education}，${PERSONA.stage}。
-角度：${post.angle}${trust}
-
-可写进正文的素材：
-${materialBlock}
-${extraNote ? `\n你补充的当下情况：\n${extraNote}\n` : ""}
-结构建议：
-1. 场景开头（发生了什么）
-2. 我做了什么（具体动作，可复用）
-3. 复盘：有效/无效各一条
-4. 结尾提问：你这周卡在哪一步？
-
-语气提醒：${PERSONA.voice}
-
-——
-如果这篇对你有一点用，评论区告诉我你的卡点；我看到会回。`;
 
   const tags = [
     "#求职",
@@ -62,22 +104,22 @@ ${extraNote ? `\n你补充的当下情况：\n${extraNote}\n` : ""}
     "#大龄求职",
     "#双非",
     `#${pillarLabel(post.pillar)}`,
-    "#简历",
-    "#面试",
     "#真实分享",
     "#职场女性",
-    "#小红书成长",
+    "#简历",
+    "#面试",
+    "#生活记录",
   ];
 
   const coverIdeas = [
-    `大字标题「${post.titleHint.slice(0, 14)}」+ 桌面简历/笔记真实场景`,
-    "人物侧脸/背影通勤感 + 一句结论手写标注（后期可叠字）",
-    "前后对比：焦虑日程 vs 结构化投递表",
+    `大字标题「${post.titleHint.slice(0, 14)}」+ 真实桌面/通勤场景`,
+    "人物侧脸或背影 + 一句结论（后期叠字）",
+    "前后对比：混乱日程 vs 结构化小步",
   ];
 
   return {
     titles,
-    body,
+    body: buildBody(post, extraNote),
     tags,
     coverIdeas,
     coverPrompt: [
@@ -89,10 +131,7 @@ ${extraNote ? `\n你补充的当下情况：\n${extraNote}\n` : ""}
   };
 }
 
-export function formatFullNote(
-  note: GeneratedNote,
-  titleIndex = 0,
-): string {
+export function formatFullNote(note: GeneratedNote, titleIndex = 0): string {
   const title = note.titles[titleIndex] ?? note.titles[0];
   return `${title}\n\n${note.body}\n\n${note.tags.join(" ")}`;
 }

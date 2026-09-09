@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, ImageIcon, RefreshCw, Upload, X } from "lucide-react";
+import { Check, Copy, ImageIcon, RefreshCw, Sparkles, Upload, X } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
-import { generateNoteFromPost, formatFullNote } from "@/lib/note-gen";
+import {
+  generateNoteFromPost,
+  formatFullNote,
+  type GeneratedNote,
+} from "@/lib/note-gen";
 import {
   buildCoverImageUrl,
   buildCoverImageUrlAlt,
@@ -39,7 +43,8 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
 export function GeneratePanel() {
   const { state, setPostStatus } = useAppStore();
   const post = state.posts.find((p) => p.id === state.selectedPostId) ?? null;
-  const [extra, setExtra] = useState("");
+  const [draftExtra, setDraftExtra] = useState("");
+  const [note, setNote] = useState<GeneratedNote | null>(null);
   const [titleIndex, setTitleIndex] = useState(0);
   const [seed, setSeed] = useState(0);
   const [imgError, setImgError] = useState(false);
@@ -52,7 +57,9 @@ export function GeneratePanel() {
   const [mode, setMode] = useState<"text" | "ref">("text");
   const [busy, setBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const [justGenerated, setJustGenerated] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("pollinations-key") ?? "";
@@ -67,6 +74,13 @@ export function GeneratePanel() {
     setResultUrl(null);
     setGenError(null);
     setMode("text");
+    setDraftExtra("");
+    setJustGenerated(false);
+    if (post) {
+      setNote(generateNoteFromPost(post, ""));
+    } else {
+      setNote(null);
+    }
   }, [post?.id]);
 
   useEffect(() => {
@@ -76,10 +90,16 @@ export function GeneratePanel() {
     };
   }, [refPreview, resultUrl]);
 
-  const note = useMemo(
-    () => (post ? generateNoteFromPost(post, extra) : null),
-    [post, extra],
-  );
+  function runGenerateCopy() {
+    if (!post) return;
+    const next = generateNoteFromPost(post, draftExtra);
+    setNote(next);
+    setTitleIndex(0);
+    setJustGenerated(true);
+    window.setTimeout(() => {
+      bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }
 
   const textCoverUrl = useMemo(() => {
     if (!post) return "";
@@ -200,15 +220,27 @@ export function GeneratePanel() {
           <Label htmlFor="extra">补充当下情况（可选）</Label>
           <Textarea
             id="extra"
-            value={extra}
-            onChange={(e) => setExtra(e.target.value)}
-            className="min-h-20 bg-white/80"
-            placeholder="这周真实发生了什么，可写进正文"
+            value={draftExtra}
+            onChange={(e) => setDraftExtra(e.target.value)}
+            className="min-h-24 bg-white/80"
+            placeholder="这周真实发生了什么，写完后点下方按钮，会写进正文"
           />
+          <p className="text-xs text-[var(--ink-soft)]">
+            填写不会自动生效，需点击「生成正文」才会进入文案。
+          </p>
         </div>
+
+        <Button
+          type="button"
+          className="mt-4 h-11 gap-2 bg-[var(--coral)] px-6 text-white hover:bg-[var(--coral-deep)]"
+          onClick={runGenerateCopy}
+        >
+          <Sparkles className="size-4" />
+          {justGenerated ? "重新生成正文" : "生成正文"}
+        </Button>
       </div>
 
-      <div className="studio-shell rounded-2xl p-5">
+      <div ref={bodyRef} className="studio-shell rounded-2xl p-5">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
           <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
@@ -234,9 +266,14 @@ export function GeneratePanel() {
 
       <div className="studio-shell rounded-2xl p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h4 className="font-display text-base text-[var(--ink)]">正文</h4>
+          <h4 className="font-display text-base text-[var(--ink)]">
+            正文（可直接复制发笔记）
+          </h4>
           <CopyBtn text={note.body} />
         </div>
+        {justGenerated ? (
+          <p className="mb-2 text-xs text-[var(--coral)]">已按你的补充重新生成</p>
+        ) : null}
         <pre className="whitespace-pre-wrap rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink)]">
           {note.body}
         </pre>

@@ -8,7 +8,8 @@ export type PillarId =
   | "resume"
   | "interview"
   | "rejection"
-  | "choice";
+  | "choice"
+  | "life";
 
 export const PILLARS: {
   id: PillarId;
@@ -45,6 +46,23 @@ export const PILLARS: {
     label: "选择与边界",
     keywords: ["offer", "试岗", "谈薪", "入职", "对比", "边界", "选择", "试用期"],
   },
+  {
+    id: "life",
+    label: "生活进展",
+    keywords: [
+      "生活",
+      "日常",
+      "搬家",
+      "作息",
+      "身体",
+      "朋友",
+      "家庭",
+      "散步",
+      "做饭",
+      "情绪管理",
+      "人物",
+    ],
+  },
 ];
 
 export const PHASES: {
@@ -59,28 +77,28 @@ export const PHASES: {
     label: "建立信任",
     weekFrom: 1,
     weekTo: 4,
-    focus: "人设可信度：双非/37岁/离职重启切片，并与简历焦虑并行",
+    focus: "第一个月慢热：每周1篇，把人设讲清楚，不堆量",
   },
   {
     id: 2,
     label: "简历与焦虑",
     weekFrom: 5,
     weekTo: 20,
-    focus: "简历、作品集、投递、等待、年龄与学历焦虑",
+    focus: "第二个月起提频；求职干货与生活进展穿插，丰满人物形象",
   },
   {
     id: 3,
     label: "offer与试岗",
     weekFrom: 21,
     weekTo: 36,
-    focus: "面试深水区、谈薪、Offer对比、试岗与入职前",
+    focus: "面试深水区、谈薪、Offer/试岗，同时保留生活切片",
   },
   {
     id: 4,
     label: "叙事收束",
     weekFrom: 37,
     weekTo: 52,
-    focus: "适应或再出发、边界感、一年复盘、下一年命题",
+    focus: "适应或再出发、边界感、一年复盘；生活与选择并置",
   },
 ];
 
@@ -101,6 +119,7 @@ export const TRUST_ANCHORS = [
   "离职原因一句话：不是逃离，是主动重启",
   "空白期怎么写进自我介绍，而不像在辩解",
   "我不卖鸡汤：只分享这一周真实发生的动作",
+  "生活没有停摆：求职之外我仍在维持节律",
 ];
 
 export function pillarLabel(id: PillarId): string {
@@ -118,9 +137,12 @@ export function phaseForWeek(week: number): PhaseId {
   return 4;
 }
 
-/** Early weeks 3–4 posts; later steady 2–3. Defaults use mid values. */
+/**
+ * Month 1 (weeks 1–4): 1 post/week.
+ * Month 2+ (week 5+): ramp to 2/week (not 3–4).
+ */
 export function defaultPostsPerWeek(week: number): number {
-  if (week <= 4) return 4;
-  if (week <= 12) return 3;
-  return 3;
+  if (week <= 4) return 1;
+  if (week <= 8) return 2;
+  return 2;
 }

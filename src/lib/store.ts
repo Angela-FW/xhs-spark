@@ -65,7 +65,7 @@ export type ChatMessage = {
 };
 
 export type AppState = {
-  version: 1;
+  version: 2;
   calendarStart: string;
   posts: CalendarPost[];
   weekMeta: { week: number; postsPerWeek: number }[];
@@ -78,7 +78,8 @@ export type AppState = {
   selectedPostId: string | null;
 };
 
-const STORAGE_KEY = "restart-life-planner-v1";
+const STORAGE_KEY = "restart-life-planner-v2";
+const LEGACY_KEY = "restart-life-planner-v1";
 
 export const DEFAULT_WEIGHTS: PillarWeights = {
   restart: 1,
@@ -87,12 +88,13 @@ export const DEFAULT_WEIGHTS: PillarWeights = {
   interview: 1,
   rejection: 0.9,
   choice: 0.8,
+  life: 1.1,
 };
 
 export function createInitialState(): AppState {
   const cal = buildYearCalendar(CALENDAR_START);
   return {
-    version: 1,
+    version: 2,
     calendarStart: cal.startDate,
     posts: cal.posts,
     weekMeta: cal.weeks.map((w) => ({
@@ -108,7 +110,7 @@ export function createInitialState(): AppState {
       {
         id: "welcome",
         role: "assistant",
-        text: "你好。你可以跟我说「下周多写面试」「少一点重启鸡汤」「这两周改成每周4篇」。我会先给出改版预览，你确认后才写入规划。",
+        text: "你好。第一个月每周1篇建立信任；第二个月起每周2篇，并穿插生活进展。可用对话调整，例如「下周多写面试」。",
         createdAt: new Date().toISOString(),
       },
     ],
@@ -120,14 +122,25 @@ export function loadState(): AppState {
   const fallback = createInitialState();
   if (typeof window === "undefined") return fallback;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw =
+      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_KEY);
     if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<AppState>;
-    if (parsed.version !== 1 || !parsed.posts?.length) return fallback;
+    const parsed = JSON.parse(raw) as Partial<AppState> & { version?: number };
+    if (!parsed.posts?.length || parsed.version !== 2) {
+      return {
+        ...fallback,
+        insights: parsed.insights ?? [],
+        feedback: parsed.feedback ?? [],
+        chat: parsed.chat?.length ? parsed.chat : fallback.chat,
+        snapshots: [],
+        pending: null,
+        weights: { ...fallback.weights, ...(parsed.weights as PillarWeights) },
+      };
+    }
     return {
       ...fallback,
       ...parsed,
-      version: 1,
+      version: 2,
       calendarStart: parsed.calendarStart || fallback.calendarStart,
       posts: parsed.posts,
       weekMeta: parsed.weekMeta?.length ? parsed.weekMeta : fallback.weekMeta,
@@ -154,11 +167,20 @@ export function exportState(state: AppState): string {
 }
 
 export function importState(json: string): AppState {
-  const parsed = JSON.parse(json) as AppState;
-  if (parsed.version !== 1 || !Array.isArray(parsed.posts)) {
+  const parsed = JSON.parse(json) as AppState & { version: number };
+  if (!Array.isArray(parsed.posts)) {
     throw new Error("备份格式不正确");
   }
-  return parsed;
+  if (parsed.version !== 2) {
+    const fresh = createInitialState();
+    return {
+      ...fresh,
+      insights: parsed.insights ?? [],
+      feedback: parsed.feedback ?? [],
+      chat: parsed.chat?.length ? parsed.chat : fresh.chat,
+    };
+  }
+  return { ...createInitialState(), ...parsed, version: 2 };
 }
 
 export function updatePost(
