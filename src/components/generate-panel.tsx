@@ -48,6 +48,7 @@ export function GeneratePanel() {
   const [note, setNote] = useState<GeneratedNote | null>(null);
   const [titleIndex, setTitleIndex] = useState(0);
   const [titleSeed, setTitleSeed] = useState(0);
+  const [bodySeed, setBodySeed] = useState(0);
   const [seed, setSeed] = useState(0);
   const [imgError, setImgError] = useState(false);
   const [useAlt, setUseAlt] = useState(false);
@@ -66,6 +67,7 @@ export function GeneratePanel() {
   useEffect(() => {
     setTitleIndex(0);
     setTitleSeed(0);
+    setBodySeed(0);
     setImgError(false);
     setUseAlt(false);
     setSeed(0);
@@ -102,9 +104,9 @@ export function GeneratePanel() {
     setTitleIndex(index);
   }
 
-  function runGenerateCopy() {
+  function applyBodyForTitle(title: string, nextBodySeed: number) {
     if (!post) return;
-    const next = generateNoteFromPost(post, draftExtra, selectedTitle);
+    const next = generateNoteFromPost(post, draftExtra, title, nextBodySeed);
     setNote((prev) => ({
       ...next,
       // Keep previously chosen / edited titles across body regenerations
@@ -114,6 +116,27 @@ export function GeneratePanel() {
     window.setTimeout(() => {
       bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
+  }
+
+  function selectTitle(index: number) {
+    if (!post || !note) {
+      setTitleIndex(index);
+      return;
+    }
+    if (index === titleIndex) return;
+    const title = note.titles[index] ?? selectedTitle;
+    setTitleIndex(index);
+    // Switching title should rewrite body so copy stays aligned
+    const nextBodySeed = bodySeed + 1;
+    setBodySeed(nextBodySeed);
+    applyBodyForTitle(title, nextBodySeed);
+  }
+
+  function runGenerateCopy() {
+    if (!post) return;
+    const nextBodySeed = bodySeed + 1;
+    setBodySeed(nextBodySeed);
+    applyBodyForTitle(selectedTitle, nextBodySeed);
   }
 
   function regenerateTitles() {
@@ -228,6 +251,57 @@ export function GeneratePanel() {
   return (
     <div className="space-y-4">
       <div className="studio-shell rounded-2xl p-5">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
+            <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+              点选一条作为当前标题；也可直接改字。换标题或点「重新生成正文」都会按当前标题重写。
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={regenerateTitles}>
+              <RefreshCw className="size-3.5" />
+              重新生成标题
+            </Button>
+            <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
+          </div>
+        </div>
+        <ul className="space-y-2">
+          {note.titles.map((t, i) => (
+            <li key={i}>
+              <div
+                className={`flex items-center gap-2 rounded-xl border px-2 py-2 ${
+                  titleIndex === i
+                    ? "border-[var(--coral)] bg-[var(--coral)]/8"
+                    : "border-transparent bg-white/60"
+                }`}
+              >
+                <button
+                  type="button"
+                  aria-label={`选用标题 ${i + 1}`}
+                  onClick={() => selectTitle(i)}
+                  className={`size-4 shrink-0 rounded-full border ${
+                    titleIndex === i
+                      ? "border-[var(--coral)] bg-[var(--coral)]"
+                      : "border-[var(--ink-soft)]/40 bg-white"
+                  }`}
+                />
+                <Input
+                  value={t}
+                  onFocus={() => {
+                    if (i !== titleIndex) selectTitle(i);
+                  }}
+                  onChange={(e) => updateTitle(i, e.target.value)}
+                  className="border-0 bg-transparent shadow-none focus-visible:ring-0"
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div ref={bodyRef} className="studio-shell rounded-2xl p-5">
+        <div className="studio-shell rounded-2xl p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs text-[var(--coral)]">
@@ -290,63 +364,16 @@ export function GeneratePanel() {
         </Button>
       </div>
 
-      <div className="studio-shell rounded-2xl p-5">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div>
-            <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
-            <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-              点选一条作为当前标题；也可直接改字。重新生成正文会记住你的选择。
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={regenerateTitles}>
-              <RefreshCw className="size-3.5" />
-              重新生成标题
-            </Button>
-            <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
-          </div>
-        </div>
-        <ul className="space-y-2">
-          {note.titles.map((t, i) => (
-            <li key={i}>
-              <div
-                className={`flex items-center gap-2 rounded-xl border px-2 py-2 ${
-                  titleIndex === i
-                    ? "border-[var(--coral)] bg-[var(--coral)]/8"
-                    : "border-transparent bg-white/60"
-                }`}
-              >
-                <button
-                  type="button"
-                  aria-label={`选用标题 ${i + 1}`}
-                  onClick={() => setTitleIndex(i)}
-                  className={`size-4 shrink-0 rounded-full border ${
-                    titleIndex === i
-                      ? "border-[var(--coral)] bg-[var(--coral)]"
-                      : "border-[var(--ink-soft)]/40 bg-white"
-                  }`}
-                />
-                <Input
-                  value={t}
-                  onFocus={() => setTitleIndex(i)}
-                  onChange={(e) => updateTitle(i, e.target.value)}
-                  className="border-0 bg-transparent shadow-none focus-visible:ring-0"
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div ref={bodyRef} className="studio-shell rounded-2xl p-5">
-        <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
           <h4 className="font-display text-base text-[var(--ink)]">
             正文（可直接复制发笔记）
           </h4>
           <CopyBtn text={note.body} />
         </div>
         {justGenerated ? (
-          <p className="mb-2 text-xs text-[var(--coral)]">已按你的补充重新生成</p>
+          <p className="mb-2 text-xs text-[var(--coral)]">
+            已按当前标题重写正文（含你的补充）
+          </p>
         ) : null}
         <pre className="whitespace-pre-wrap rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink)]">
           {note.body}

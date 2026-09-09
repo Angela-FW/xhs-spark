@@ -15,6 +15,8 @@ const TITLE_OPENERS = [
   "不是鸡汤，是实操",
   "我把复杂问题拆小了",
   "给正在找工作的你",
+  "37岁才敢说的真话",
+  "离职后没人教我这步",
 ];
 
 const TITLE_ENDINGS = [
@@ -23,6 +25,8 @@ const TITLE_ENDINGS = [
   "情绪稳住后就有解",
   "这一条真的能落地",
   "今天就能开始做",
+  "比鸡汤管用",
+  "我亲自踩过坑",
 ];
 
 function hashSeed(input: string): number {
@@ -31,7 +35,7 @@ function hashSeed(input: string): number {
   return h;
 }
 
-function pick(list: string[], offset: number): string {
+function pick<T>(list: T[], offset: number): T {
   return list[offset % list.length];
 }
 
@@ -45,8 +49,9 @@ export function generateTitleCandidates(
   const ending = pick(TITLE_ENDINGS, baseSeed >> 3);
   const formatWord =
     post.format === "tips" ? "干货" : post.format === "emotion" ? "真心话" : "记录";
+  const core = post.titleHint.replace(/^.*?｜/, "").slice(0, 18);
   const fallbackTitles = [
-    `${opener}｜${post.titleHint}`,
+    `${opener}｜${core || post.titleHint}`,
     `${pillarLabel(post.pillar)}｜${post.hooks[0] ?? "真实记录"}`,
     `37岁双非求职｜${post.angle.slice(0, 16)}`,
     `${formatWord}｜${post.hooks[1] ?? ending}`,
@@ -58,93 +63,368 @@ export function generateTitleCandidates(
   return [pinned, ...fallbackTitles.filter((t) => t !== pinned)].slice(0, 5);
 }
 
-function materialParagraphs(post: CalendarPost, extraNote: string): string[] {
+function materialBits(post: CalendarPost, extraNote: string): string[] {
   const fromMats = post.materials.map((m) => m.polished).filter(Boolean);
   const lines: string[] = [];
-  if (extraNote.trim()) {
-    lines.push(extraNote.trim());
+  if (extraNote.trim()) lines.push(extraNote.trim().replace(/\s+/g, " "));
+  for (const m of fromMats.slice(0, 3)) {
+    lines.push(m.replace(/\s+/g, " ").trim());
   }
-  for (const m of fromMats.slice(0, 3)) lines.push(m);
   return lines;
 }
 
-function buildBody(
+function cleanTitle(input: string): string {
+  return input
+    .replace(/^.*?｜/, "")
+    .replace(/[「」【】]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function endSentence(text: string): string {
+  const t = text.trim();
+  if (!t) return t;
+  return /[。！？…]$/.test(t) ? t : `${t}。`;
+}
+
+function stripPeriod(text: string): string {
+  return text.replace(/[。！？…]+$/, "").trim();
+}
+
+/** Turn planner jargon into speakable Xiaohongshu lines. */
+function humanAngle(angle: string): string {
+  let text = angle.trim();
+  text = text
+    .replace(/^现在时开场[：:]*/, "")
+    .replace(/^用极具体的一天动作[，,]*/, "")
+    .replace(/^把「?([^」]+)」?拆成.*/, "先把「$1」拆小")
+    .replace(/只用一段回看离职动机/, "先用一段话把离职原因说清楚")
+    .replace(/代替空泛重启宣言/, "少喊口号，多写当天真实动作")
+    .replace(/对外介绍怎么说，才不像在辩解/, "对外介绍时，少辩解，多讲事实")
+    .replace(/用「停止清单」建立边界感/, "先列一份停止清单，守住边界")
+    .replace(/事实层\/能力层\/匹配层，避免情绪辩护/, "先讲事实，再讲能力，最后讲匹配")
+    .replace(/用履历密度回答稳定性，不承诺感动/, "用履历密度证明稳定，不靠感动")
+    .replace(/删改前后对照（脱敏），只留可验证结果/, "删掉空形容词，只留能被验证的结果")
+    .replace(/用一份JD拆解反推简历条目/, "对着一份JD，反推简历该怎么写")
+    .replace(/数量下降、回复质量上升的一周记录/, "少海投，提高回复质量")
+    .trim();
+  if (!text) return "先把眼前这一步做清楚";
+  return stripPeriod(text);
+}
+
+function sceneByPillar(post: CalendarPost, seed: number): string {
+  const scenes: Record<string, string[]> = {
+    restart: [
+      "电脑一关，房间忽然安静得过分。",
+      "离职邮件发出去之后，我坐了很久。",
+      "那天没人通知我「你要开始新生活了」。",
+    ],
+    "age-edu": [
+      "简历上「本科」两个字，我又看了两遍。",
+      "被问学历的时候，我停了半秒。",
+      "年龄框一跳出来，手指会先顿一下。",
+    ],
+    resume: [
+      "简历第N版打开时，我先删掉了一排形容词。",
+      "改到一半，我突然意识到：写满不等于写清。",
+      "投出去前，我只留能被追问的那几句。",
+    ],
+    interview: [
+      "进会议室前，我把自我介绍又压短了一遍。",
+      "对面一开口问稳定性，我知道这题绕不过。",
+      "面试结束走路回家，脑子还在回放某一句。",
+    ],
+    rejection: [
+      "「已读不回」跳出的瞬间，胃先紧了一下。",
+      "拒信很短，短到我连生气都来不及。",
+      "刷新到第三次，我把手机扣过去了。",
+    ],
+    choice: [
+      "两个选项摆在一起，我反而更不敢动。",
+      "谈薪那晚，我把利弊列成两列还是睡不着。",
+      "不是没有选择，是怕选错成本太高。",
+    ],
+    life: [
+      "求职之外，晚饭还是得自己做。",
+      "散步走到第三个路口，脑子才松开一点。",
+      "把桌子擦干净的时候，人会踏实一点。",
+    ],
+  };
+  return pick(scenes[post.pillar] ?? scenes.restart, seed);
+}
+
+function painByFormat(post: CalendarPost, seed: number): string {
+  if (post.format === "tips") {
+    return pick(
+      [
+        "我以前也以为，多做一点就会有结果。",
+        "最耗人的不是忙，是忙完还是不确定有没有用。",
+        "一着急，就容易把所有事一起堆上来。",
+      ],
+      seed,
+    );
+  }
+  if (post.format === "emotion") {
+    return pick(
+      [
+        "难受的时候，我最怕有人一句「想开点」。",
+        "不是矫情，是真的会怀疑自己是不是慢了。",
+        "情绪来的时候，道理一句都进不来。",
+      ],
+      seed,
+    );
+  }
+  return pick(
+    [
+      "卡住的感觉很普通，普通到不好意思跟别人说。",
+      "没有戏剧化崩溃，就是停在原地出不了下一格。",
+      "我不是没努力，是努力的方向一度很糊。",
+    ],
+    seed,
+  );
+}
+
+function ctaByFormat(post: CalendarPost, seed: number): string {
+  if (post.format === "tips") {
+    return pick(
+      [
+        "你要是也卡在同一步，评论区丢你的卡点，我看到会回。",
+        "收藏一下，下次改的时候对着做就行。",
+        "同路的人，评论区报个到，看看大家都卡在哪。",
+      ],
+      seed,
+    );
+  }
+  if (post.format === "emotion") {
+    return pick(
+      [
+        "你要是也有过这种时刻，评论区回个「同」，我就知道不是我一个人。",
+        "不想讲道理也没关系，留个字就行。",
+        "如果这篇让你松了一口气，把你的状态丢一句在评论区。",
+      ],
+      seed,
+    );
+  }
+  return pick(
+    [
+      "这篇如果戳到你，告诉我你这周卡在哪一步。",
+      "同频的话，评论区见。",
+      "你也在路上的话，留一句你现在的真实进度。",
+    ],
+    seed,
+  );
+}
+
+function buildHook(title: string, post: CalendarPost, seed: number): string {
+  const t = cleanTitle(title) || post.titleHint;
+  if (post.format === "tips") {
+    return pick(
+      [
+        `${t}。\n别先加量，先改方法。`,
+        `如果你也在为「${t}」反复内耗，\n这篇给你能直接抄的三步。`,
+        `${t}。\n我试过很多无效努力，最后只留下这几条。`,
+      ],
+      seed,
+    );
+  }
+  if (post.format === "emotion") {
+    return pick(
+      [
+        `${t}。\n今天不想扮冷静。`,
+        `写「${t}」的时候，\n我手还是会紧一下。`,
+        `${t}。\n这篇给同样不敢示弱的人。`,
+      ],
+      seed,
+    );
+  }
+  return pick(
+    [
+      `${t}。\n我是卡过之后，才敢这么写的。`,
+      `先说一句可能不太好听的：\n${t}，真的不是靠「再拼一把」就能过。`,
+      `关于「${t}」，\n我想把最真实的那几天写清楚。`,
+      `${t}。\n这篇不装励志，只写我实际怎么走过来的。`,
+    ],
+    seed,
+  );
+}
+
+function buildIdentity(post: CalendarPost): string {
+  if (post.trustAnchor) return endSentence(post.trustAnchor);
+  return `${PERSONA.age}岁，${PERSONA.education}，现在还在找工作。`;
+}
+
+function buildTipsBody(
+  post: CalendarPost,
+  title: string,
+  bits: string[],
+  seed: number,
+): string {
+  const t = cleanTitle(title);
+  const angleLine = humanAngle(post.angle);
+  const rawSteps = bits.length
+    ? bits.slice(0, 3).map((b) => endSentence(stripPeriod(b)))
+    : [
+        endSentence(angleLine),
+        "每句话改成「做了什么 + 结果是什么」，少写形容词。",
+        "改完大声读一遍：别人能不能 30 秒听懂。",
+      ];
+  while (rawSteps.length < 3) {
+    const fillers = [
+      endSentence(angleLine),
+      "一次只改一个变量，改完再看反馈。",
+      "把形容词删掉，留下能被追问的事实。",
+    ];
+    rawSteps.push(fillers[rawSteps.length]);
+  }
+  const steps = rawSteps.slice(0, 3).map((b, i) => `${i + 1}. ${b}`);
+
+  return [
+    buildHook(title, post, seed),
+    "",
+    buildIdentity(post),
+    "",
+    painByFormat(post, seed + 1),
+    sceneByPillar(post, seed + 2),
+    "",
+    bits[0]
+      ? `这周真实发生的是：\n${endSentence(bits[0])}`
+      : `围绕「${t}」，我这周只做一件事：\n${endSentence(angleLine)}`,
+    "",
+    "后来我留下的做法只有这几条：",
+    ...steps,
+    "",
+    pick(
+      [
+        "踩过的坑：一着急就想一次证明所有价值。\n结果写得又满又空。",
+        "无效的做法：同时改标题、改经历、改投递渠道。\n有效的做法：一次只改一个变量。",
+        "我以前总想「全面升级」。\n现在只要求：今天推进一格，就算赢。",
+      ],
+      seed + 3,
+    ),
+    "",
+    `我提醒自己：${endSentence(angleLine)}`,
+    "",
+    ctaByFormat(post, seed + 4),
+  ].join("\n");
+}
+
+function buildEmotionBody(
+  post: CalendarPost,
+  title: string,
+  bits: string[],
+  seed: number,
+): string {
+  const mid = bits.length
+    ? bits.map((b) => endSentence(b)).join("\n\n")
+    : pick(
+        [
+          "那天情绪上来，我没有逼自己立刻正面思考。\n我只允许自己难受一小会儿，然后去做下一件具体的小事。",
+          "我把感受写下来，写完才发现：\n怕的不是失败，是「再努力也没用」这种感觉。",
+          "没跟任何人诉苦。\n就自己坐着，把心跳等慢一点，再打开文档。",
+        ],
+        seed,
+      );
+
+  return [
+    buildHook(title, post, seed),
+    "",
+    buildIdentity(post),
+    "",
+    painByFormat(post, seed + 1),
+    "",
+    mid,
+    "",
+    sceneByPillar(post, seed + 2),
+    "",
+    pick(
+      [
+        "后来我接受一件事：\n情绪可以在，动作不能停。",
+        "靠想通人生没用。\n我真正能做的，是把下一步动作找回来。",
+        "不要求自己马上振作。\n只要求自己别在刷新里耗一整晚。",
+      ],
+      seed + 3,
+    ),
+    "",
+    `所以落到「${cleanTitle(title)}」，我只抓这一步：\n${endSentence(humanAngle(post.angle))}`,
+    "",
+    ctaByFormat(post, seed + 4),
+  ].join("\n");
+}
+
+function buildStoryBody(
+  post: CalendarPost,
+  title: string,
+  bits: string[],
+  seed: number,
+): string {
+  const angleLine = humanAngle(post.angle);
+  const scene = bits[0]
+    ? endSentence(bits[0])
+    : `${sceneByPillar(post, seed)}\n关于「${cleanTitle(title)}」，我停了很久。`;
+  const action = bits[1]
+    ? endSentence(bits[1])
+    : `然后我逼自己先动起来：\n${endSentence(angleLine)}\n当天只推进能完成的一小步。`;
+  const reflect = bits[2]
+    ? endSentence(bits[2])
+    : pick(
+        [
+          "回头看，有效的是把问题变小。\n无效的是反复刷新，等谁来证明我还可以。",
+          "真正难的往往不是能力。\n是焦虑时，容易把一件事想成整个人生的判决书。",
+          "我开始少问「我是不是不行」。\n多问「今天能推进哪一格」。",
+        ],
+        seed + 1,
+      );
+
+  return [
+    buildHook(title, post, seed),
+    "",
+    buildIdentity(post),
+    "",
+    scene,
+    "",
+    painByFormat(post, seed + 2),
+    "",
+    action,
+    "",
+    reflect,
+    "",
+    `我现在给自己的路线只有一句：\n${endSentence(angleLine)}`,
+    "",
+    ctaByFormat(post, seed + 3),
+  ].join("\n");
+}
+
+function compactBlankLines(text: string): string {
+  return text
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function buildBody(
   post: CalendarPost,
   extraNote: string,
   titleHook = post.titleHint,
+  bodySeed = 0,
 ): string {
-  const bits = materialParagraphs(post, extraNote);
-  const trust = post.trustAnchor
-    ? `顺便说一句：${post.trustAnchor}。`
-    : `${PERSONA.age}岁、${PERSONA.education}，我已经在找工作的路上了——这篇不装励志，只写清楚。`;
-
-  if (post.format === "tips") {
-    const steps = bits.length
-      ? bits.map((b, i) => `${i + 1}. ${b}`).join("\n")
-      : [
-          `1. 先把目标说清楚：这篇围绕「${post.angle}」。`,
-          `2. 我本周实际做了：把这件事拆成可检查的小步，每天只推进一格。`,
-          `3. 复查标准：能向别人用一分钟讲明白，并且留下可验证记录。`,
-        ].join("\n");
-
-    return `先说结论：关于「${titleHook}」，我这周只抓住一件事——${post.angle}。
-
-${trust}
-
-可以直接抄的做法：
-${steps}
-
-我踩过的坑：一上来写太满、想一次证明所有价值。后来我改成「一次只改一个变量」，反而更稳。
-
-如果你也卡在同类问题上，评论区丢一句你的卡点；我看到会回。`;
-  }
-
-  if (post.format === "emotion") {
-    const mid = bits.length
-      ? bits.map((b) => b).join("\n\n")
-      : `那天情绪上来的时候，我没有逼自己立刻「正面思考」。我只做了两件事：把感受写下来，然后规定自己难过到某个点必须停，去干下一件具体的小事。`;
-
-    return `今天不想扮冷静。关于「${titleHook}」，我想把真实感受写清楚。
-
-${trust}
-
-${mid}
-
-写到这里我仍会紧一下，但紧完之后我知道下一步是什么：回到${pillarLabel(post.pillar)}里那个可执行动作，而不是跟自己辩论对不对。
-
-角度我提醒自己：${post.angle}
-
-你要是也有过类似时刻，评论区可以只回一个字「同」，我就知道不是我一个人。`;
-  }
-
-  // story
-  const scene = bits[0]
-    ? bits[0]
-    : `那天我对着「${titleHook}」这件事停了很久。不是戏剧化的崩溃，是普通的停顿——停完，还是得继续。`;
-  const action = bits[1]
-    ? bits[1]
-    : `然后我做了具体动作：围绕「${post.angle}」，只推进能在当天完成的一小步，并记下来。`;
-  const reflect = bits[2]
-    ? bits[2]
-    : `复盘很短：有效的是把问题变小；无效的是反复刷新消息、期待一次证明自己。`;
-
-  return `${scene}
-
-${trust}
-
-${action}
-
-${reflect}
-
-我还在路上。这篇如果对你有一点用，评论区告诉我你这周卡在哪一步。`;
+  const bits = materialBits(post, extraNote);
+  const seed = hashSeed(`${post.id}:${titleHook}:${extraNote}:${bodySeed}`);
+  let body = "";
+  if (post.format === "tips") body = buildTipsBody(post, titleHook, bits, seed);
+  else if (post.format === "emotion")
+    body = buildEmotionBody(post, titleHook, bits, seed);
+  else body = buildStoryBody(post, titleHook, bits, seed);
+  return compactBlankLines(body);
 }
 
 export function generateNoteFromPost(
   post: CalendarPost,
   extraNote = "",
   selectedTitle?: string,
+  bodySeed = 0,
 ): GeneratedNote {
-  const titles = generateTitleCandidates(post, 0, selectedTitle);
+  const titleForBody = selectedTitle?.trim() || post.titleHint;
+  const titles = generateTitleCandidates(post, bodySeed, selectedTitle);
 
   const tags = [
     "#求职",
@@ -160,16 +440,14 @@ export function generateNoteFromPost(
   ];
 
   const coverIdeas = [
-    `大字标题「${post.titleHint.slice(0, 14)}」+ 真实桌面/通勤场景`,
+    `大字标题「${cleanTitle(titleForBody).slice(0, 14)}」+ 真实桌面/通勤场景`,
     "人物侧脸或背影 + 一句结论（后期叠字）",
     "前后对比：混乱日程 vs 结构化小步",
   ];
 
-  const titleForBody = selectedTitle?.trim() || post.titleHint;
-
   return {
     titles,
-    body: buildBody(post, extraNote, titleForBody),
+    body: buildBody(post, extraNote, titleForBody, bodySeed),
     tags,
     coverIdeas,
     coverPrompt: [
