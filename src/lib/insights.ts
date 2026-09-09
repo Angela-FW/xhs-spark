@@ -199,7 +199,14 @@ export function polishLine(raw: string, pillar: PillarId = "resume"): string {
     const before = rest[0] ? `前些天还在硬扛：${stripPeriod(rest[0])}。` : "";
     const now =
       rest.length > 1
-        ? `这几天居然摸到一点节奏——\n${rest.slice(1).map(stripPeriod).join("，")}，\n开始变成日常了。`
+        ? `这几天居然摸到一点节奏——\n${rest
+            .slice(1)
+            .map((c) =>
+              stripPeriod(c)
+                .replace(/都开始变成习惯/, "也开始变成习惯")
+                .replace(/开始变成习惯/, "变成了习惯"),
+            )
+            .join("，")}。`
         : rest[0]
           ? `这几天居然开始把「${stripPeriod(rest[0])}」当成日常。`
           : "这几天居然开始摸到一点节奏。";
