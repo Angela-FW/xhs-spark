@@ -13,8 +13,7 @@ export function InsightInbox() {
   const [raw, setRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const currentWeek =
-    state.posts.find((p) => p.id === state.selectedPostId)?.week ?? 1;
+  const currentWeek = inferCurrentWeek(state.calendarStart);
 
   function onProcess() {
     if (!raw.trim()) {
@@ -117,4 +116,14 @@ export function InsightInbox() {
       )}
     </div>
   );
+}
+
+function inferCurrentWeek(calendarStart: string): number {
+  const start = new Date(`${calendarStart}T00:00:00`);
+  const today = new Date();
+  const diffDays = Math.max(
+    0,
+    Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)),
+  );
+  return Math.floor(diffDays / 7) + 1;
 }

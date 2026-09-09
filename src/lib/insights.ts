@@ -203,32 +203,76 @@ export function recommendPostsForInsight(
   posts: CalendarPost[],
   fromWeek = 1,
 ): { post: CalendarPost; reason: string }[] {
+  const keywords = collectKeywords(`${insight.raw} ${insight.polished}`);
   const candidates = posts
     .filter((p) => p.status === "planned" && p.week >= fromWeek)
-    .filter((p) => p.week <= fromWeek + 8 || p.pillar === insight.pillar);
+    .filter((p) => p.week <= fromWeek + 5 || p.pillar === insight.pillar);
 
   const scored = candidates
     .map((post) => {
       let score = 0;
       const reasons: string[] = [];
+      const weekGap = post.week - fromWeek;
+      const overlap = keywordOverlap(
+        keywords,
+        collectKeywords(`${post.titleHint} ${post.angle} ${post.hooks.join(" ")}`),
+      );
+
       if (post.pillar === insight.pillar) {
-        score += 5;
+        score += 4;
         reasons.push("支柱一致");
       }
-      if (post.week <= fromWeek + 4) {
-        score += 2;
-        reasons.push("近四周可发");
-      } else if (post.week > fromWeek + 8) {
-        score -= 1;
-        reasons.push("跨阶段存稿");
-      }
-      if (post.materials.length === 0) {
+
+      if (weekGap <= 1) {
+        score += 4;
+        reasons.push("提交时间很近");
+      } else if (weekGap <= 3) {
+        score += 2.5;
+        reasons.push("近几周可发");
+      } else if (weekGap <= 5) {
         score += 1;
+        reasons.push("可提前备稿");
+      } else {
+        score -= 3;
+        reasons.push("离当前太远");
+      }
+
+      if (overlap > 0) {
+        score += Math.min(4, overlap * 1.4);
+        reasons.push(`内容匹配 ${overlap} 处`);
+      }
+
+      if (post.materials.length === 0) {
+        score += 0.6;
         reasons.push("尚无素材");
       }
+
       return { post, score, reason: reasons.join(" · ") || "可挂载" };
     })
     .sort((a, b) => b.score - a.score || a.post.week - b.post.week);
 
   return scored.slice(0, 3).map(({ post, reason }) => ({ post, reason }));
+}
+
+function collectKeywords(text: string): string[] {
+  const hits = new Set<string>();
+  for (const pillar of PILLARS) {
+    for (const keyword of pillar.keywords) {
+      if (keyword.length >= 2 && text.includes(keyword)) hits.add(keyword);
+    }
+  }
+  for (const token of text.split(/[，,。；;：:\s、|]+/)) {
+    const cleaned = token.trim();
+    if (cleaned.length >= 2 && cleaned.length <= 8) hits.add(cleaned);
+  }
+  return Array.from(hits);
+}
+
+function keywordOverlap(a: string[], b: string[]): number {
+  const setB = new Set(b);
+  let count = 0;
+  for (const key of a) {
+    if (setB.has(key)) count += 1;
+  }
+  return count;
 }
