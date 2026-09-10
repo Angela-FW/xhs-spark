@@ -1,6 +1,13 @@
 import type { CalendarPost, PostMaterial, YearCalendar } from "./year-calendar";
 import { buildYearCalendar } from "./year-calendar";
-import { CALENDAR_START, type PillarId } from "./persona";
+import {
+  CALENDAR_START,
+  DEFAULT_PERSONA,
+  clonePersona,
+  normalizePersona,
+  type CreatorPersona,
+  type PillarId,
+} from "./persona";
 
 export type InsightCard = {
   id: string;
@@ -38,7 +45,10 @@ export type CalibrationSnapshot = {
   weightsBefore: PillarWeights;
   weightsAfter: PillarWeights;
   changedPostIds: string[];
-  postsBefore: Pick<CalendarPost, "id" | "titleHint" | "angle" | "pillar" | "format">[];
+  postsBefore: Pick<
+    CalendarPost,
+    "id" | "titleHint" | "angle" | "pillar" | "format"
+  >[];
 };
 
 export type PendingCalibration = {
@@ -65,7 +75,8 @@ export type ChatMessage = {
 };
 
 export type AppState = {
-  version: 2;
+  version: 3;
+  persona: CreatorPersona;
   calendarStart: string;
   posts: CalendarPost[];
   weekMeta: { week: number; postsPerWeek: number }[];
@@ -78,8 +89,8 @@ export type AppState = {
   selectedPostId: string | null;
 };
 
-const STORAGE_KEY = "restart-life-planner-v2";
-const LEGACY_KEY = "restart-life-planner-v1";
+const STORAGE_KEY = "restart-life-planner-v3";
+const LEGACY_KEYS = ["restart-life-planner-v2", "restart-life-planner-v1"];
 
 export const DEFAULT_WEIGHTS: PillarWeights = {
   restart: 1,
@@ -91,10 +102,29 @@ export const DEFAULT_WEIGHTS: PillarWeights = {
   life: 1.1,
 };
 
-export function createInitialState(): AppState {
-  const cal = buildYearCalendar(CALENDAR_START);
+function welcomeChat(persona: CreatorPersona): ChatMessage {
+  const mixHint =
+    persona.contentMix === "life"
+      ? "偏生活切片，穿插少量选择与关系议题"
+      : persona.contentMix === "career"
+        ? "偏职场成长，穿插生活节律"
+        : "第一个月每周1篇建立信任；第二个月起每周2篇，并穿插生活进展";
   return {
-    version: 2,
+    id: "welcome",
+    role: "assistant",
+    text: `你好，当前人设是「${persona.name}」。${mixHint}。可用对话微调，例如「下周多写${persona.contentMix === "life" ? "日常" : "面试"}」。`,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export function createInitialState(
+  persona: CreatorPersona = DEFAULT_PERSONA,
+): AppState {
+  const p = clonePersona(persona);
+  const cal = buildYearCalendar(CALENDAR_START, p);
+  return {
+    version: 3,
+    persona: p,
     calendarStart: cal.startDate,
     posts: cal.posts,
     weekMeta: cal.weeks.map((w) => ({
@@ -106,41 +136,77 @@ export function createInitialState(): AppState {
     weights: { ...DEFAULT_WEIGHTS },
     pending: null,
     snapshots: [],
-    chat: [
-      {
-        id: "welcome",
-        role: "assistant",
-        text: "你好。第一个月每周1篇建立信任；第二个月起每周2篇，并穿插生活进展。可用对话调整，例如「下周多写面试」。",
-        createdAt: new Date().toISOString(),
-      },
-    ],
+    chat: [welcomeChat(p)],
     selectedPostId: cal.posts[0]?.id ?? null,
   };
 }
 
-export function loadState(): AppState {
+/** Rebuild year plan from persona; keep insights / feedback / chat soft data. */
+export function rebuildCalendarFromPersona(
+  state: AppState,
+  persona: CreatorPersona,
+  calendarStart = state.calendarStart,
+): AppState {
+  const p = clonePersona(persona);
+  const cal = buildYearCalendar(calendarStart || CALENDAR_START, p);
+  const oldById = new Map(state.posts.map((post) => [post.id, post]));
+
+  const posts = cal.posts.map((post) => {
+    const prev = oldById.get(post.id);
+    if (!prev) return post;
+    return {
+      ...post,
+      materials: prev.materials ?? [],
+      status:
+        prev.status === "published" || prev.status === "drafted"
+          ? prev.status
+          : post.status,
+    };
+  });
+
+  return {
+    ...state,
+    version: 3,
+    persona: p,
+    calendarStart: cal.startDate,
+    posts,
+    weekMeta: cal.weeks.map((w) => ({
+      week: w.week,
+      postsPerWeek: w.postsPerWeek,
+    })),
+    pending: null,
+    selectedPostId:
+      posts.find((x) => x.id === state.selectedPostId)?.id ??
+      posts[0]?.id ??
+      null,
+  };
+}
+
+export function updatePersonaFields(
+  state: AppState,
+  persona: CreatorPersona,
+): AppState {
+  return {
+    ...state,
+    persona: clonePersona(persona),
+  };
+}
+
+function migrateParsed(
+  parsed: Omit<Partial<AppState>, "version"> & { version?: number },
+): AppState {
   const fallback = createInitialState();
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw =
-      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<AppState> & { version?: number };
-    if (!parsed.posts?.length || parsed.version !== 2) {
-      return {
-        ...fallback,
-        insights: parsed.insights ?? [],
-        feedback: parsed.feedback ?? [],
-        chat: parsed.chat?.length ? parsed.chat : fallback.chat,
-        snapshots: [],
-        pending: null,
-        weights: { ...fallback.weights, ...(parsed.weights as PillarWeights) },
-      };
-    }
+  const persona = normalizePersona(
+    (parsed as { persona?: Partial<CreatorPersona> }).persona ??
+      fallback.persona,
+  );
+
+  if (parsed.version === 3 && parsed.posts?.length) {
     return {
       ...fallback,
       ...parsed,
-      version: 2,
+      version: 3,
+      persona,
       calendarStart: parsed.calendarStart || fallback.calendarStart,
       posts: parsed.posts,
       weekMeta: parsed.weekMeta?.length ? parsed.weekMeta : fallback.weekMeta,
@@ -152,6 +218,53 @@ export function loadState(): AppState {
       chat: parsed.chat?.length ? parsed.chat : fallback.chat,
       selectedPostId: parsed.selectedPostId ?? fallback.selectedPostId,
     };
+  }
+
+  // v2 or broken: rebuild calendar with persona, keep soft data
+  if (parsed.posts?.length && parsed.version === 2) {
+    const soft: AppState = {
+      ...fallback,
+      persona,
+      insights: parsed.insights ?? [],
+      feedback: parsed.feedback ?? [],
+      chat: parsed.chat?.length ? parsed.chat : fallback.chat,
+      weights: { ...fallback.weights, ...(parsed.weights as PillarWeights) },
+      snapshots: parsed.snapshots ?? [],
+      pending: null,
+      calendarStart: parsed.calendarStart || fallback.calendarStart,
+      selectedPostId: parsed.selectedPostId ?? fallback.selectedPostId,
+    };
+    return rebuildCalendarFromPersona(soft, persona, soft.calendarStart);
+  }
+
+  return {
+    ...fallback,
+    persona,
+    insights: parsed.insights ?? [],
+    feedback: parsed.feedback ?? [],
+    chat: parsed.chat?.length ? parsed.chat : fallback.chat,
+    snapshots: [],
+    pending: null,
+    weights: { ...fallback.weights, ...(parsed.weights as PillarWeights) },
+  };
+}
+
+export function loadState(): AppState {
+  const fallback = createInitialState();
+  if (typeof window === "undefined") return fallback;
+  try {
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      for (const key of LEGACY_KEYS) {
+        raw = localStorage.getItem(key);
+        if (raw) break;
+      }
+    }
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<AppState> & { version?: number };
+    const migrated = migrateParsed(parsed);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+    return migrated;
   } catch {
     return fallback;
   }
@@ -167,20 +280,11 @@ export function exportState(state: AppState): string {
 }
 
 export function importState(json: string): AppState {
-  const parsed = JSON.parse(json) as AppState & { version: number };
-  if (!Array.isArray(parsed.posts)) {
-    throw new Error("备份格式不正确");
+  const parsed = JSON.parse(json) as Partial<AppState> & { version: number };
+  if (!Array.isArray(parsed.posts) && parsed.version !== 3) {
+    // allow persona-only? still require posts or rebuild
   }
-  if (parsed.version !== 2) {
-    const fresh = createInitialState();
-    return {
-      ...fresh,
-      insights: parsed.insights ?? [],
-      feedback: parsed.feedback ?? [],
-      chat: parsed.chat?.length ? parsed.chat : fresh.chat,
-    };
-  }
-  return { ...createInitialState(), ...parsed, version: 2 };
+  return migrateParsed(parsed);
 }
 
 export function updatePost(

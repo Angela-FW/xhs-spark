@@ -19,11 +19,14 @@ import {
   exportState,
   importState,
   loadState,
+  rebuildCalendarFromPersona,
   saveState,
+  updatePersonaFields,
   updatePost,
 } from "@/lib/store";
 import { applyPending, proposeFromFeedback, undoLastSnapshot } from "@/lib/calibrate";
 import { parseDialogue } from "@/lib/dialogue";
+import type { CreatorPersona } from "@/lib/persona";
 
 type StoreApi = {
   state: AppState;
@@ -42,6 +45,8 @@ type StoreApi = {
   discardPending: () => void;
   undoCalibration: () => void;
   sendDialogue: (text: string) => void;
+  updatePersona: (persona: CreatorPersona) => void;
+  applyPersonaAndRebuild: (persona: CreatorPersona) => void;
   exportJson: () => string;
   importJson: (json: string) => void;
   resetAll: () => void;
@@ -176,6 +181,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const updatePersona = useCallback((persona: CreatorPersona) => {
+    setState((s) => updatePersonaFields(s, persona));
+  }, []);
+
+  const applyPersonaAndRebuild = useCallback((persona: CreatorPersona) => {
+    setState((s) => rebuildCalendarFromPersona(s, persona));
+  }, []);
+
   const exportJson = useCallback(() => exportState(state), [state]);
 
   const importJson = useCallback((json: string) => {
@@ -201,6 +214,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       discardPending,
       undoCalibration,
       sendDialogue,
+      updatePersona,
+      applyPersonaAndRebuild,
       exportJson,
       importJson,
       resetAll,
@@ -219,6 +234,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       discardPending,
       undoCalibration,
       sendDialogue,
+      updatePersona,
+      applyPersonaAndRebuild,
       exportJson,
       importJson,
       resetAll,

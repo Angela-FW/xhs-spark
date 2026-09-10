@@ -1,4 +1,4 @@
-import { PILLARS, type PillarId } from "./persona";
+import { PILLARS, defaultPillarForPersona, type CreatorPersona, type PillarId } from "./persona";
 import type { CalendarPost } from "./year-calendar";
 import type { InsightCard } from "./store";
 
@@ -6,7 +6,10 @@ function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-export function routePillar(text: string): PillarId {
+export function routePillar(
+  text: string,
+  persona?: CreatorPersona,
+): PillarId {
   const scores = PILLARS.map((p) => ({
     id: p.id,
     score: p.keywords.reduce((acc, kw) => {
@@ -28,8 +31,14 @@ export function routePillar(text: string): PillarId {
     const age = scores.find((s) => s.id === "age-edu");
     if (age) age.score = Math.max(0, age.score - 2);
   }
+  if (persona?.contentMix === "life") {
+    const life = scores.find((s) => s.id === "life");
+    if (life) life.score += 1;
+  }
   scores.sort((a, b) => b.score - a.score);
-  if (scores[0].score === 0) return "resume";
+  if (scores[0].score === 0) {
+    return persona ? defaultPillarForPersona(persona) : "resume";
+  }
   return scores[0].id;
 }
 
@@ -179,7 +188,10 @@ function needsDesensitize(text: string): string | undefined {
   return undefined;
 }
 
-export function processInsights(rawBlob: string): InsightCard[] {
+export function processInsights(
+  rawBlob: string,
+  persona?: CreatorPersona,
+): InsightCard[] {
   const chunks = rawBlob
     .split(/\n{2,}|\n(?=[-•·]|\d+[.、])/u)
     .map((s) => s.replace(/^[-•·\d.、\s]+/, "").trim())
@@ -197,7 +209,7 @@ export function processInsights(rawBlob: string): InsightCard[] {
   }
 
   return unique.slice(0, 12).map((raw) => {
-    const pillar = routePillar(raw);
+    const pillar = routePillar(raw, persona);
     const polished = polishLine(raw, pillar);
     return {
       id: uid("ins"),

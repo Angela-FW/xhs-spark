@@ -22,7 +22,7 @@ export function InsightInbox() {
       return;
     }
     setError(null);
-    const cards = processInsights(raw);
+    const cards = processInsights(raw, state.persona);
     if (!cards.length) {
       setError("没有识别到可用片段，试着多写几句或分段");
       return;

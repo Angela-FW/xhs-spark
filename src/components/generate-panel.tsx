@@ -77,13 +77,13 @@ export function GeneratePanel() {
     setDraftExtra("");
     setJustGenerated(false);
     if (post) {
-      setNote(generateNoteFromPost(post, ""));
+      setNote(generateNoteFromPost(post, state.persona, ""));
       setCoverPrompt("");
     } else {
       setNote(null);
       setCoverPrompt("");
     }
-  }, [post?.id]);
+  }, [post?.id, state.persona]);
 
   useEffect(() => {
     return () => {
@@ -106,7 +106,13 @@ export function GeneratePanel() {
 
   function applyBodyForTitle(title: string, nextBodySeed: number) {
     if (!post) return;
-    const next = generateNoteFromPost(post, draftExtra, title, nextBodySeed);
+    const next = generateNoteFromPost(
+      post,
+      state.persona,
+      draftExtra,
+      title,
+      nextBodySeed,
+    );
     setNote((prev) => ({
       ...next,
       // Keep previously chosen / edited titles across body regenerations
@@ -145,7 +151,12 @@ export function GeneratePanel() {
       const nextSeed = prevSeed + 1;
       setNote((prev) => {
         if (!prev) return prev;
-        const titles = generateTitleCandidates(post, nextSeed, selectedTitle);
+        const titles = generateTitleCandidates(
+          post,
+          state.persona,
+          nextSeed,
+          selectedTitle,
+        );
         return { ...prev, titles };
       });
       setTitleIndex(0);
@@ -305,7 +316,8 @@ export function GeneratePanel() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs text-[var(--coral)]">
-              第{post.week}周 · {phaseLabel(post.phase)} · {pillarLabel(post.pillar)}
+              第{post.week}周 · {phaseLabel(post.phase, state.persona)} ·{" "}
+              {pillarLabel(post.pillar)}
             </p>
             <h3 className="font-display mt-1 text-lg text-[var(--ink)]">
               {post.titleHint}

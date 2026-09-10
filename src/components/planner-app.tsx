@@ -6,11 +6,12 @@ import { CalendarBoard } from "@/components/calendar-board";
 import { InsightInbox } from "@/components/insight-inbox";
 import { DialoguePanel } from "@/components/dialogue-panel";
 import { GeneratePanel } from "@/components/generate-panel";
-import { PERSONA } from "@/lib/persona";
+import { PersonaPanel } from "@/components/persona-panel";
 import { Button } from "@/components/ui/button";
 
 const TABS = [
   { id: "calendar", label: "日历" },
+  { id: "persona", label: "人设" },
   { id: "insights", label: "感悟" },
   { id: "dialogue", label: "对话" },
   { id: "generate", label: "生成" },
@@ -23,6 +24,7 @@ function PlannerInner() {
   const { exportJson, importJson, resetAll, state } = useAppStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const [mounted, setMounted] = useState(false);
+  const persona = state.persona;
 
   useEffect(() => {
     setMounted(true);
@@ -43,7 +45,13 @@ function PlannerInner() {
             文案 + 一年规划，边写边调整
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ink-soft)] sm:text-base">
-            {PERSONA.age}岁 · {PERSONA.background} · {PERSONA.stage}
+            {[
+              persona.age ? `${persona.age}岁` : null,
+              persona.background || null,
+              persona.stage || null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
             。从 {state.calendarStart} 起排内容阶段；生成小红书文案与免费封面图，不生成视频。
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -123,6 +131,7 @@ function PlannerInner() {
 
         <div className="pb-16">
           {tab === "calendar" ? <CalendarBoard /> : null}
+          {tab === "persona" ? <PersonaPanel /> : null}
           {tab === "insights" ? <InsightInbox /> : null}
           {tab === "dialogue" ? <DialoguePanel /> : null}
           {tab === "generate" ? <GeneratePanel /> : null}

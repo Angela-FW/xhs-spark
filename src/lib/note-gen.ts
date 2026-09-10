@@ -1,4 +1,8 @@
-import { PERSONA, pillarLabel } from "./persona";
+import {
+  pillarLabel,
+  personaIdentityLine,
+  type CreatorPersona,
+} from "./persona";
 import type { CalendarPost } from "./year-calendar";
 
 export type GeneratedNote = {
@@ -14,14 +18,14 @@ const TITLE_OPENERS = [
   "我这周终于想明白",
   "不是鸡汤，是实操",
   "我把复杂问题拆小了",
-  "给正在找工作的你",
-  "37岁才敢说的真话",
-  "离职后没人教我这步",
+  "给正在路上的你",
+  "我才敢说的真话",
+  "没人教我这步",
 ];
 
 const TITLE_ENDINGS = [
   "先把这一步做完",
-  "比盲投有效很多",
+  "比盲干有效很多",
   "情绪稳住后就有解",
   "这一条真的能落地",
   "今天就能开始做",
@@ -41,6 +45,7 @@ function pick<T>(list: T[], offset: number): T {
 
 export function generateTitleCandidates(
   post: CalendarPost,
+  persona: CreatorPersona,
   seed = 0,
   selectedTitle?: string,
 ): string[] {
@@ -50,12 +55,23 @@ export function generateTitleCandidates(
   const formatWord =
     post.format === "tips" ? "干货" : post.format === "emotion" ? "真心话" : "记录";
   const core = post.titleHint.replace(/^.*?｜/, "").slice(0, 18);
+  const ageBg = [persona.age ? `${persona.age}岁` : null, persona.background || null]
+    .filter(Boolean)
+    .join("");
+  const audienceHint =
+    persona.contentMix === "life"
+      ? "写给同样认真过日常的人"
+      : persona.contentMix === "career"
+        ? "写给同样在职场里找节奏的人"
+        : "写给同样在找工作的人";
   const fallbackTitles = [
     `${opener}｜${core || post.titleHint}`,
     `${pillarLabel(post.pillar)}｜${post.hooks[0] ?? "真实记录"}`,
-    `37岁双非求职｜${post.angle.slice(0, 16)}`,
+    ageBg
+      ? `${ageBg}｜${post.angle.slice(0, 16)}`
+      : `${persona.name}｜${post.angle.slice(0, 16)}`,
     `${formatWord}｜${post.hooks[1] ?? ending}`,
-    `写给同样在找工作的人｜${ending}`,
+    `${audienceHint}｜${ending}`,
   ];
 
   const pinned = selectedTitle?.trim();
@@ -116,23 +132,23 @@ function sceneByPillar(post: CalendarPost, seed: number): string {
   const scenes: Record<string, string[]> = {
     restart: [
       "电脑一关，房间忽然安静得过分。",
-      "离职邮件发出去之后，我坐了很久。",
+      "那封邮件发出去之后，我坐了很久。",
       "那天没人通知我「你要开始新生活了」。",
     ],
     "age-edu": [
-      "简历上「本科」两个字，我又看了两遍。",
-      "被问学历的时候，我停了半秒。",
+      "简历上那两个字，我又看了两遍。",
+      "被追问背景的时候，我停了半秒。",
       "年龄框一跳出来，手指会先顿一下。",
     ],
     resume: [
-      "简历第N版打开时，我先删掉了一排形容词。",
+      "文档第N版打开时，我先删掉了一排形容词。",
       "改到一半，我突然意识到：写满不等于写清。",
-      "投出去前，我只留能被追问的那几句。",
+      "发出去前，我只留能被追问的那几句。",
     ],
     interview: [
-      "进会议室前，我把自我介绍又压短了一遍。",
-      "对面一开口问稳定性，我知道这题绕不过。",
-      "面试结束走路回家，脑子还在回放某一句。",
+      "进门前，我把自我介绍又压短了一遍。",
+      "对面一开口，我知道这题绕不过。",
+      "结束后走路回家，脑子还在回放某一句。",
     ],
     rejection: [
       "「已读不回」跳出的瞬间，胃先紧了一下。",
@@ -141,16 +157,16 @@ function sceneByPillar(post: CalendarPost, seed: number): string {
     ],
     choice: [
       "两个选项摆在一起，我反而更不敢动。",
-      "谈薪那晚，我把利弊列成两列还是睡不着。",
+      "那天晚上，我把利弊列成两列还是睡不着。",
       "不是没有选择，是怕选错成本太高。",
     ],
     life: [
-      "求职之外，晚饭还是得自己做。",
+      "主线之外，晚饭还是得自己做。",
       "散步走到第三个路口，脑子才松开一点。",
       "把桌子擦干净的时候，人会踏实一点。",
     ],
   };
-  return pick(scenes[post.pillar] ?? scenes.restart, seed);
+  return pick(scenes[post.pillar] ?? scenes.life, seed);
 }
 
 function painByFormat(post: CalendarPost, seed: number): string {
@@ -248,13 +264,16 @@ function buildHook(title: string, post: CalendarPost, seed: number): string {
   );
 }
 
-function buildIdentity(post: CalendarPost): string {
+function buildIdentity(post: CalendarPost, persona: CreatorPersona): string {
   if (post.trustAnchor) return endSentence(post.trustAnchor);
-  return `${PERSONA.age}岁，${PERSONA.background}，现在还在找工作。`;
+  const line = personaIdentityLine(persona);
+  if (line) return endSentence(line);
+  return endSentence(persona.name);
 }
 
 function buildTipsBody(
   post: CalendarPost,
+  persona: CreatorPersona,
   title: string,
   bits: string[],
   seed: number,
@@ -281,7 +300,7 @@ function buildTipsBody(
   return [
     buildHook(title, post, seed),
     "",
-    buildIdentity(post),
+    buildIdentity(post, persona),
     "",
     painByFormat(post, seed + 1),
     sceneByPillar(post, seed + 2),
@@ -296,7 +315,7 @@ function buildTipsBody(
     pick(
       [
         "踩过的坑：一着急就想一次证明所有价值。\n结果写得又满又空。",
-        "无效的做法：同时改标题、改经历、改投递渠道。\n有效的做法：一次只改一个变量。",
+        "无效的做法：同时改太多变量。\n有效的做法：一次只改一个。",
         "我以前总想「全面升级」。\n现在只要求：今天推进一格，就算赢。",
       ],
       seed + 3,
@@ -310,6 +329,7 @@ function buildTipsBody(
 
 function buildEmotionBody(
   post: CalendarPost,
+  persona: CreatorPersona,
   title: string,
   bits: string[],
   seed: number,
@@ -320,7 +340,7 @@ function buildEmotionBody(
         [
           "那天情绪上来，我没有逼自己立刻正面思考。\n我只允许自己难受一小会儿，然后去做下一件具体的小事。",
           "我把感受写下来，写完才发现：\n怕的不是失败，是「再努力也没用」这种感觉。",
-          "没跟任何人诉苦。\n就自己坐着，把心跳等慢一点，再打开文档。",
+          "没跟任何人诉苦。\n就自己坐着，把心跳等慢一点，再打开下一项。",
         ],
         seed,
       );
@@ -328,7 +348,7 @@ function buildEmotionBody(
   return [
     buildHook(title, post, seed),
     "",
-    buildIdentity(post),
+    buildIdentity(post, persona),
     "",
     painByFormat(post, seed + 1),
     "",
@@ -353,6 +373,7 @@ function buildEmotionBody(
 
 function buildStoryBody(
   post: CalendarPost,
+  persona: CreatorPersona,
   title: string,
   bits: string[],
   seed: number,
@@ -378,7 +399,7 @@ function buildStoryBody(
   return [
     buildHook(title, post, seed),
     "",
-    buildIdentity(post),
+    buildIdentity(post, persona),
     "",
     scene,
     "",
@@ -403,6 +424,7 @@ function compactBlankLines(text: string): string {
 
 export function buildBody(
   post: CalendarPost,
+  persona: CreatorPersona,
   extraNote: string,
   titleHook = post.titleHint,
   bodySeed = 0,
@@ -410,34 +432,28 @@ export function buildBody(
   const bits = materialBits(post, extraNote);
   const seed = hashSeed(`${post.id}:${titleHook}:${extraNote}:${bodySeed}`);
   let body = "";
-  if (post.format === "tips") body = buildTipsBody(post, titleHook, bits, seed);
+  if (post.format === "tips")
+    body = buildTipsBody(post, persona, titleHook, bits, seed);
   else if (post.format === "emotion")
-    body = buildEmotionBody(post, titleHook, bits, seed);
-  else body = buildStoryBody(post, titleHook, bits, seed);
+    body = buildEmotionBody(post, persona, titleHook, bits, seed);
+  else body = buildStoryBody(post, persona, titleHook, bits, seed);
   return compactBlankLines(body);
 }
 
 export function generateNoteFromPost(
   post: CalendarPost,
+  persona: CreatorPersona,
   extraNote = "",
   selectedTitle?: string,
   bodySeed = 0,
 ): GeneratedNote {
   const titleForBody = selectedTitle?.trim() || post.titleHint;
-  const titles = generateTitleCandidates(post, bodySeed, selectedTitle);
+  const titles = generateTitleCandidates(post, persona, bodySeed, selectedTitle);
 
   const tags = [
-    "#求职",
-    "#离职重启",
-    "#大龄求职",
-    "#双非",
+    ...persona.noteTags,
     `#${pillarLabel(post.pillar)}`,
-    "#真实分享",
-    "#职场女性",
-    "#简历",
-    "#面试",
-    "#生活记录",
-  ];
+  ].filter((t, i, arr) => arr.indexOf(t) === i);
 
   const coverIdeas = [
     `大字标题「${cleanTitle(titleForBody).slice(0, 14)}」+ 真实桌面/通勤场景`,
@@ -447,13 +463,14 @@ export function generateNoteFromPost(
 
   return {
     titles,
-    body: buildBody(post, extraNote, titleForBody, bodySeed),
+    body: buildBody(post, persona, extraNote, titleForBody, bodySeed),
     tags,
     coverIdeas,
     coverPrompt: [
       "Xiaohongshu vertical cover",
       titleForBody,
       pillarLabel(post.pillar),
+      persona.name,
       "warm paper coral accent, no text in image",
     ].join(", "),
   };

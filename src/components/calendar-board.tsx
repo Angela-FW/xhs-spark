@@ -6,18 +6,15 @@ import { phaseLabel, pillarLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-const PHASE_FILTER = [
-  { id: 0, label: "全部" },
-  { id: 1, label: "建立信任" },
-  { id: 2, label: "简历与焦虑" },
-  { id: 3, label: "offer与试岗" },
-  { id: 4, label: "叙事收束" },
-] as const;
-
 export function CalendarBoard() {
   const { state, setSelectedPostId } = useAppStore();
   const [phase, setPhase] = useState<number>(0);
   const [weekJump, setWeekJump] = useState(1);
+
+  const phaseFilter = [
+    { id: 0, label: "全部" },
+    ...state.persona.phases.map((p) => ({ id: p.id, label: p.label })),
+  ];
 
   const weeks = useMemo(() => {
     const map = new Map<number, typeof state.posts>();
@@ -33,7 +30,7 @@ export function CalendarBoard() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {PHASE_FILTER.map((p) => (
+        {phaseFilter.map((p) => (
           <Button
             key={p.id}
             type="button"
@@ -96,7 +93,7 @@ export function CalendarBoard() {
                   {posts[0]?.weekStart}
                 </span>
                 <Badge variant="secondary">
-                  {phaseLabel(posts[0]?.phase ?? 1)}
+                  {phaseLabel(posts[0]?.phase ?? 1, state.persona)}
                 </Badge>
                 <Badge variant="outline">
                   规划 {meta?.postsPerWeek ?? posts.length} 篇/周
