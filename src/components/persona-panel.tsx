@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/app-store";
 import {
+  MAX_SAVED_PERSONAS,
   PERSONA_PRESETS,
   applyEditableFields,
   clonePersona,
   editableFieldsFromPersona,
-  getPreset,
   type CreatorPersona,
   type PresetId,
 } from "@/lib/persona";
@@ -18,8 +18,20 @@ import { Textarea } from "@/components/ui/textarea";
 
 type Fields = ReturnType<typeof editableFieldsFromPersona>;
 
+const SYSTEM_PRESETS = PERSONA_PRESETS.filter((p) => p.id !== "custom");
+
 export function PersonaPanel() {
-  const { state, updatePersona, applyPersonaAndRebuild } = useAppStore();
+  const {
+    state,
+    updatePersona,
+    applyPersonaAndRebuild,
+    applySystemPreset,
+    savePersonaToList,
+    savePersonaToListAndRebuild,
+    removeSavedPersona,
+    pickSavedPersona,
+    startBlankCustom,
+  } = useAppStore();
   const [draft, setDraft] = useState<CreatorPersona>(() =>
     clonePersona(state.persona),
   );
@@ -42,32 +54,87 @@ export function PersonaPanel() {
     return applyEditableFields(base, fields);
   }
 
-  function onPickPreset(id: PresetId) {
-    const next = getPreset(id);
-    setDraft(next);
-    setFields(editableFieldsFromPersona(next));
-    setSavedHint(null);
+  const activeSaved = state.activeSavedPersonaId;
+  const systemActive =
+    !activeSaved && SYSTEM_PRESETS.some((p) => p.id === draft.presetId);
+
+  function confirmRebuild(detail: string): boolean {
+    return confirm(
+      `${detail}\n\n会清空其他周的「待写」选题，只保留已起草/已发布，并新生成未来一周。确定继续？`,
+    );
   }
 
-  function onSaveFields() {
+  function onPickSystem(id: PresetId) {
+    if (systemActive && draft.presetId === id) return;
+    if (!confirmRebuild("切换系统预设")) return;
+    applySystemPreset(id);
+    setSavedHint("已切换系统预设：页头、阶段标签已同步，并重算了未来最近一周的待写选题");
+  }
+
+  function onPickSaved(id: string) {
+    if (activeSaved === id) return;
+    if (!confirmRebuild("切换自定义人设")) return;
+    pickSavedPersona(id);
+    setSavedHint("已切换自定义人设，并重算了未来最近一周的待写选题");
+  }
+
+  function onStartBlank() {
+    if (!activeSaved && draft.presetId === "custom") return;
+    if (!confirmRebuild("新建空白自定义人设")) return;
+    startBlankCustom();
+    setSavedHint("已打开空白自定义人设，填完后点「保存」加入列表");
+  }
+
+  function buildCustomPersona(): CreatorPersona {
+    return {
+      ...buildFromFields(),
+      presetId: "custom",
+    };
+  }
+
+  /** 已有人设 → 更新；新建自定义 → 新增；系统预设 → 只更新当前使用 */
+  function onSave() {
+    if (state.activeSavedPersonaId || draft.presetId === "custom") {
+      const next = buildCustomPersona();
+      setDraft(next);
+      const id = savePersonaToList(next, next.name);
+      if (id) {
+        const isUpdate = Boolean(state.activeSavedPersonaId);
+        setSavedHint(
+          isUpdate
+            ? `已更新人设「${next.name}」`
+            : `已新增人设「${next.name}」`,
+        );
+      }
+      return;
+    }
     const next = buildFromFields();
     setDraft(next);
     updatePersona(next);
-    setSavedHint("人设已保存（尚未重算日历）");
+    setSavedHint("已保存当前系统预设的修改（未写入自定义列表）");
   }
 
-  function onRebuild() {
-    const next = buildFromFields();
-    if (
-      !confirm(
-        "将按当前人设重算全年 52 周规划。感悟、对话、反馈会保留；已发布/草稿状态与挂载素材尽量按周次保留。确定继续？",
-      )
-    ) {
+  function onSaveAndRebuild() {
+    if (!confirmRebuild("保存并重算选题")) return;
+    if (state.activeSavedPersonaId || draft.presetId === "custom") {
+      const next = buildCustomPersona();
+      setDraft(next);
+      const id = savePersonaToListAndRebuild(next, next.name);
+      if (id) {
+        setSavedHint(`已保存「${next.name}」，并重算了未来最近一周的待写选题`);
+      }
       return;
     }
+    const next = buildFromFields();
     setDraft(next);
     applyPersonaAndRebuild(next);
-    setSavedHint("已按人设重算全年规划");
+    setSavedHint("已保存，并重算了未来最近一周的待写选题");
+  }
+
+  function onDeleteSaved(id: string, label: string) {
+    if (!confirm(`删除自定义人设「${label}」？此操作不可恢复。`)) return;
+    removeSavedPersona(id);
+    setSavedHint(`已删除「${label}」`);
   }
 
   return (
@@ -75,30 +142,88 @@ export function PersonaPanel() {
       <div className="studio-shell rounded-2xl p-5">
         <h3 className="font-display text-lg text-[var(--ink)]">创作者人设</h3>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          选预设或自行改字段。保存只更新人设；「重算全年规划」会按 topic
-          种子重建日历，做成通用创作者工具。
+          系统预设可一键切换；自定义人设保存后会出现在下方列表（最多{" "}
+          {MAX_SAVED_PERSONAS} 个）。
         </p>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {PERSONA_PRESETS.map((p) => (
+        <p className="mt-4 text-xs font-medium text-[var(--ink-soft)]">系统预设</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {SYSTEM_PRESETS.map((p) => (
             <Button
               key={p.id}
               type="button"
               size="sm"
-              variant={draft.presetId === p.id ? "default" : "outline"}
+              variant={
+                systemActive && draft.presetId === p.id ? "default" : "outline"
+              }
               className={
-                draft.presetId === p.id
+                systemActive && draft.presetId === p.id
                   ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
                   : ""
               }
-              onClick={() => onPickPreset(p.id)}
+              onClick={() => onPickSystem(p.id)}
             >
               {p.label}
             </Button>
           ))}
+          <Button
+            type="button"
+            size="sm"
+            variant={!activeSaved && draft.presetId === "custom" ? "default" : "outline"}
+            className={
+              !activeSaved && draft.presetId === "custom"
+                ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+                : ""
+            }
+            onClick={onStartBlank}
+          >
+            + 新建自定义
+          </Button>
+        </div>
+
+        <p className="mt-4 text-xs font-medium text-[var(--ink-soft)]">
+          我的人设（{state.savedPersonas.length}/{MAX_SAVED_PERSONAS}）
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {state.savedPersonas.length === 0 ? (
+            <p className="text-xs text-[var(--ink-soft)]">
+              还没有自定义人设。编辑下方字段后点「保存到人设列表」。
+            </p>
+          ) : (
+            state.savedPersonas.map((s) => (
+              <div key={s.id} className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={activeSaved === s.id ? "default" : "outline"}
+                  className={
+                    activeSaved === s.id
+                      ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+                      : ""
+                  }
+                  onClick={() => onPickSaved(s.id)}
+                >
+                  {s.label}
+                </Button>
+                <button
+                  type="button"
+                  className="rounded-md px-1.5 text-xs text-[var(--ink-soft)] hover:bg-white/70 hover:text-[var(--ink)]"
+                  title="删除"
+                  onClick={() => onDeleteSaved(s.id, s.label)}
+                >
+                  ×
+                </button>
+              </div>
+            ))
+          )}
         </div>
         <p className="mt-2 text-xs text-[var(--ink-soft)]">
-          {PERSONA_PRESETS.find((p) => p.id === draft.presetId)?.blurb}
+          {activeSaved
+            ? `当前：自定义「${state.savedPersonas.find((s) => s.id === activeSaved)?.label ?? ""}」`
+            : SYSTEM_PRESETS.find((p) => p.id === draft.presetId)?.blurb ||
+              (draft.presetId === "custom"
+                ? "空白自定义：填写后保存到人设列表"
+                : "")}
         </p>
       </div>
 
@@ -110,6 +235,7 @@ export function PersonaPanel() {
               id="persona-name"
               value={fields.name}
               onChange={(e) => patchField("name", e.target.value)}
+              placeholder="如：美食博主"
             />
           </div>
           <div className="space-y-2">
@@ -138,7 +264,7 @@ export function PersonaPanel() {
               id="persona-bg"
               value={fields.background}
               onChange={(e) => patchField("background", e.target.value)}
-              placeholder="如：双非本科 / 互联网从业"
+              placeholder="如：家常菜 / 探店"
             />
           </div>
         </div>
@@ -184,24 +310,20 @@ export function PersonaPanel() {
             value={fields.noteTagsText}
             onChange={(e) => patchField("noteTagsText", e.target.value)}
             className="min-h-16 bg-white/80"
-            placeholder="#真实分享 #生活记录"
+            placeholder="#美食 #家常菜 #探店"
           />
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onSaveFields}
-          >
-            仅保存人设
+          <Button type="button" variant="outline" onClick={onSave}>
+            保存
           </Button>
           <Button
             type="button"
             className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-            onClick={onRebuild}
+            onClick={onSaveAndRebuild}
           >
-            应用人设并重算全年规划
+            保存并重算最近一周
           </Button>
         </div>
         {savedHint ? (
@@ -214,7 +336,13 @@ export function PersonaPanel() {
           当前生效：{state.persona.name} · {state.persona.age}岁
           {state.persona.background ? ` · ${state.persona.background}` : ""}
         </p>
-        <p className="mt-1">阶段示例：{state.persona.phases.map((p) => p.label).join(" → ")}</p>
+        <p className="mt-1">
+          日历阶段标签：{state.persona.phases.map((p) => p.label).join(" → ")}
+        </p>
+        <p className="mt-1 text-xs">
+          「保存」：已有人设则更新，新建则加入列表（最多 {MAX_SAVED_PERSONAS}{" "}
+          个）。「保存并重算最近一周」会清空其他待写周，只保留已起草/已发布，并新生成未来一周。需要更长规划时，到日历点「生成更多」。
+        </p>
       </div>
     </div>
   );

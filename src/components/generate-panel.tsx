@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, ImageIcon, RefreshCw, Sparkles, Upload, X } from "lucide-react";
+import { Check, Copy, ImageIcon, RefreshCw, Sparkles } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
 import {
   generateNoteFromPost,
@@ -9,13 +9,12 @@ import {
   formatFullNote,
   type GeneratedNote,
 } from "@/lib/note-gen";
+import { generateNoteBodyForPost } from "@/lib/note-ai";
 import {
-  buildCoverImageUrl,
-  buildCoverImageUrlAlt,
   buildCoverPrompt,
-  buildImg2ImgUrl,
-  editCoverFromFile,
+  generateCoverImage,
 } from "@/lib/cover-image";
+import { composeTypographicCover, parseCoverBrief } from "@/lib/cover-compose";
 import { pillarLabel, phaseLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,8 +40,8 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
   );
 }
 
-export function GeneratePanel() {
-  const { state, setPostStatus } = useAppStore();
+export function GeneratePanel({ onClose }: { onClose?: () => void }) {
+  const { state, setPostStatus, saveDraft } = useAppStore();
   const post = state.posts.find((p) => p.id === state.selectedPostId) ?? null;
   const [draftExtra, setDraftExtra] = useState("");
   const [note, setNote] = useState<GeneratedNote | null>(null);
@@ -50,47 +49,68 @@ export function GeneratePanel() {
   const [titleSeed, setTitleSeed] = useState(0);
   const [bodySeed, setBodySeed] = useState(0);
   const [seed, setSeed] = useState(0);
-  const [imgError, setImgError] = useState(false);
-  const [useAlt, setUseAlt] = useState(false);
   const [coverPrompt, setCoverPrompt] = useState("");
-  const [refFile, setRefFile] = useState<File | null>(null);
-  const [refPreview, setRefPreview] = useState<string | null>(null);
-  const [refUrl, setRefUrl] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [mode, setMode] = useState<"text" | "ref">("text");
   const [busy, setBusy] = useState(false);
+  const [bodyBusy, setBodyBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const [bodyHint, setBodyHint] = useState<string | null>(null);
   const [justGenerated, setJustGenerated] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyReqId = useRef(0);
 
   useEffect(() => {
-    setTitleIndex(0);
     setTitleSeed(0);
     setBodySeed(0);
-    setImgError(false);
-    setUseAlt(false);
     setSeed(0);
     setResultUrl(null);
     setGenError(null);
-    setMode("text");
-    setDraftExtra("");
+    setBodyHint(null);
     setJustGenerated(false);
-    if (post) {
+    setBodyBusy(false);
+    bodyReqId.current += 1;
+    if (post?.draft?.titles?.length) {
+      setNote({
+        titles: post.draft.titles,
+        body: post.draft.body,
+        tags: post.draft.tags,
+        coverIdeas: [],
+        coverPrompt: "",
+      });
+      setTitleIndex(post.draft.titleIndex ?? 0);
+      setDraftExtra(post.draft.extra ?? "");
+      setCoverPrompt("");
+    } else if (post) {
       setNote(generateNoteFromPost(post, state.persona, ""));
+      setTitleIndex(0);
+      setDraftExtra("");
       setCoverPrompt("");
     } else {
       setNote(null);
+      setTitleIndex(0);
+      setDraftExtra("");
       setCoverPrompt("");
     }
   }, [post?.id, state.persona]);
 
   useEffect(() => {
     return () => {
-      if (refPreview?.startsWith("blob:")) URL.revokeObjectURL(refPreview);
       if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
     };
-  }, [refPreview, resultUrl]);
+  }, [resultUrl]);
+
+  function persistAndClose() {
+    if (post && note) {
+      saveDraft(post.id, {
+        titles: note.titles,
+        titleIndex,
+        body: note.body,
+        tags: note.tags,
+        extra: draftExtra,
+      });
+    }
+    onClose?.();
+  }
 
   const selectedTitle =
     note?.titles[titleIndex] ?? note?.titles[0] ?? post?.titleHint ?? "";
@@ -104,24 +124,43 @@ export function GeneratePanel() {
     setTitleIndex(index);
   }
 
-  function applyBodyForTitle(title: string, nextBodySeed: number) {
+  async function applyBodyForTitle(title: string, nextBodySeed: number) {
     if (!post) return;
-    const next = generateNoteFromPost(
-      post,
-      state.persona,
-      draftExtra,
-      title,
-      nextBodySeed,
-    );
-    setNote((prev) => ({
-      ...next,
-      // Keep previously chosen / edited titles across body regenerations
-      titles: prev?.titles?.length ? prev.titles : next.titles,
-    }));
-    setJustGenerated(true);
-    window.setTimeout(() => {
-      bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
+    const reqId = ++bodyReqId.current;
+    setBodyBusy(true);
+    setBodyHint("正在生成正文…");
+    setGenError(null);
+    try {
+      const { note: next, result } = await generateNoteBodyForPost(
+        post,
+        state.persona,
+        draftExtra,
+        title,
+        nextBodySeed,
+        note?.titles,
+      );
+      if (reqId !== bodyReqId.current) return;
+      setNote(next);
+      setJustGenerated(true);
+      if (result.source === "ai") {
+        setBodyHint(
+          result.attempts > 1
+            ? `已用模型生成（第 ${result.attempts} 次成功）`
+            : "已用模型生成",
+        );
+      } else {
+        setBodyHint(
+          `模型连续 ${result.attempts} 次失败，已改用本地模板${
+            result.error ? `：${result.error}` : ""
+          }`,
+        );
+      }
+      window.setTimeout(() => {
+        bodyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    } finally {
+      if (reqId === bodyReqId.current) setBodyBusy(false);
+    }
   }
 
   function selectTitle(index: number) {
@@ -132,17 +171,16 @@ export function GeneratePanel() {
     if (index === titleIndex) return;
     const title = note.titles[index] ?? selectedTitle;
     setTitleIndex(index);
-    // Switching title should rewrite body so copy stays aligned
     const nextBodySeed = bodySeed + 1;
     setBodySeed(nextBodySeed);
-    applyBodyForTitle(title, nextBodySeed);
+    void applyBodyForTitle(title, nextBodySeed);
   }
 
   function runGenerateCopy() {
-    if (!post) return;
+    if (!post || bodyBusy) return;
     const nextBodySeed = bodySeed + 1;
     setBodySeed(nextBodySeed);
-    applyBodyForTitle(selectedTitle, nextBodySeed);
+    void applyBodyForTitle(selectedTitle, nextBodySeed);
   }
 
   function regenerateTitles() {
@@ -177,90 +215,83 @@ export function GeneratePanel() {
 
   const activePrompt = coverPrompt.trim() || autoCoverPrompt;
 
-  const textCoverUrl = useMemo(() => {
-    if (!post) return "";
-    const opts = { seed: seed || undefined, prompt: activePrompt || undefined };
-    return useAlt
-      ? buildCoverImageUrlAlt(post, opts)
-      : buildCoverImageUrl(post, opts);
-  }, [post, seed, useAlt, activePrompt]);
-
-  const displayUrl =
-    mode === "ref" && resultUrl
-      ? resultUrl
-      : mode === "ref" && refUrl.trim() && post
-        ? buildImg2ImgUrl(post, refUrl.trim(), {
-            seed: seed || undefined,
-            prompt: activePrompt || undefined,
-          })
-        : textCoverUrl;
-
-  async function onPickFile(file: File | null) {
-    if (refPreview?.startsWith("blob:")) URL.revokeObjectURL(refPreview);
-    setRefFile(file);
-    setResultUrl(null);
-    setGenError(null);
-    if (!file) {
-      setRefPreview(null);
-      return;
-    }
-    setRefPreview(URL.createObjectURL(file));
-    setMode("ref");
-  }
-
-  async function generateCover() {
+  async function generateCover(nextSeed?: number) {
     if (!post) return;
     setGenError(null);
-    setImgError(false);
 
     const promptToUse = coverPrompt.trim() || autoCoverPrompt;
     if (!promptToUse) {
-      setGenError("请先生成正文，或填写提示词 / 上传参考图");
+      setGenError("请先生成正文，或填写提示词");
       return;
     }
 
-    // With reference image → img2img
-    if (refFile) {
-      setBusy(true);
-      try {
-        const url = await editCoverFromFile(post, refFile, {
-          seed: seed || Date.now() % 100000,
-          prompt: promptToUse,
+    const useSeed = nextSeed ?? (seed || Date.now() % 100000);
+    setSeed(useSeed);
+    setBusy(true);
+
+    try {
+      const brief = parseCoverBrief(promptToUse);
+      // Structured 内容/风格/颜色 → local typography (Chinese text drawn accurately)
+      if (brief.wantsText && brief.contentItems.length > 0) {
+        const url = await composeTypographicCover(brief, {
+          title: selectedTitle || post.titleHint,
         });
         if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
         setResultUrl(url);
-        setMode("ref");
-      } catch (err) {
-        setGenError(err instanceof Error ? err.message : "图生图失败");
-      } finally {
-        setBusy(false);
+        return;
       }
-      return;
-    }
 
-    if (refUrl.trim()) {
-      setMode("ref");
-      setResultUrl(null);
-      setSeed((s) => s + 1 || Date.now() % 100000);
-      return;
+      const url = await generateCoverImage(post, {
+        seed: useSeed,
+        prompt: promptToUse,
+        credentials: { provider: "cloudflare" },
+      });
+      if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
+      setResultUrl(url);
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : "生图失败");
+    } finally {
+      setBusy(false);
     }
-
-    // Prompt empty + no image → use title/body auto prompt
-    setMode("text");
-    setResultUrl(null);
-    setSeed((s) => s + 1 || Date.now() % 100000);
   }
 
   if (!post || !note) {
     return (
-      <div className="empty-panel rounded-2xl px-6 py-12 text-center text-sm text-[var(--ink-soft)]">
-        先在「日历」里点选一篇笔记，再回来生成文案与封面图。
+      <div className="space-y-4">
+        {onClose ? (
+          <div className="studio-shell sticky top-2 z-20 -mt-2 flex items-center gap-3 rounded-2xl p-2">
+            <Button type="button" size="sm" variant="outline" onClick={persistAndClose}>
+              ← 返回日历
+            </Button>
+          </div>
+        ) : null}
+        <div className="empty-panel rounded-2xl px-6 py-12 text-center text-sm text-[var(--ink-soft)]">
+          先在「日历」里点选一篇笔记，再回来生成文案与封面图。
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {onClose ? (
+        <div className="studio-shell sticky top-2 z-20 -mt-2 flex items-center justify-between gap-3 rounded-2xl p-2">
+          <Button type="button" size="sm" variant="outline" onClick={persistAndClose}>
+            ← 返回日历
+          </Button>
+          <p className="truncate text-sm text-[var(--ink-soft)]">
+            关闭时自动保存草稿
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+            onClick={persistAndClose}
+          >
+            保存并返回
+          </Button>
+        </div>
+      ) : null}
       <div className="studio-shell rounded-2xl p-5">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
@@ -339,7 +370,7 @@ export function GeneratePanel() {
               className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
               onClick={() => setPostStatus(post.id, "published")}
             >
-              标为已发布
+              标为已发布（记下今天）
             </Button>
           </div>
         </div>
@@ -369,10 +400,15 @@ export function GeneratePanel() {
         <Button
           type="button"
           className="mt-4 h-11 gap-2 bg-[var(--coral)] px-6 text-white hover:bg-[var(--coral-deep)]"
+          disabled={bodyBusy}
           onClick={runGenerateCopy}
         >
           <Sparkles className="size-4" />
-          {justGenerated ? "重新生成正文" : "生成正文"}
+          {bodyBusy
+            ? "生成中…"
+            : justGenerated
+              ? "重新生成正文"
+              : "生成正文"}
         </Button>
       </div>
 
@@ -382,7 +418,9 @@ export function GeneratePanel() {
           </h4>
           <CopyBtn text={note.body} />
         </div>
-        {justGenerated ? (
+        {bodyHint ? (
+          <p className="mb-2 text-xs text-[var(--coral)]">{bodyHint}</p>
+        ) : justGenerated ? (
           <p className="mb-2 text-xs text-[var(--coral)]">
             已按当前标题重写正文（含你的补充）
           </p>
@@ -411,11 +449,10 @@ export function GeneratePanel() {
               type="button"
               size="sm"
               variant="outline"
+              disabled={busy}
               onClick={() => {
-                setSeed((s) => s + 1 || Date.now() % 100000);
-                setImgError(false);
-                setResultUrl(null);
-                if (refFile || refUrl.trim()) void generateCover();
+                const next = (seed || Date.now() % 100000) + 1;
+                void generateCover(next);
               }}
             >
               <RefreshCw className="size-3.5" />
@@ -427,6 +464,10 @@ export function GeneratePanel() {
             />
           </div>
         </div>
+
+        <p className="mb-4 text-xs text-[var(--ink-soft)]">
+          使用本机已配置的 Cloudflare 每日免费额度。填写提示词后点「生成封面」即可。
+        </p>
 
         <div className="space-y-2 rounded-xl border border-[var(--coral)]/25 bg-[var(--coral)]/5 p-4">
           <Label htmlFor="cover-prompt" className="text-sm font-medium text-[var(--ink)]">
@@ -440,84 +481,9 @@ export function GeneratePanel() {
             placeholder="可留空。留空时将根据当前标题和正文自动匹配生成封面…"
           />
           <p className="text-xs text-[var(--ink-soft)]">
-            提示词和参考图都可空。都空时，按标题 + 正文内容自动生成匹配图片。
+            写「内容 / 风格 / 颜色」时，会按内容在封面上排版文字（中文可准确显示）。
+            纯画面描述则走 AI 生图。留空时按当前标题和正文自动生成。
           </p>
-          {!coverPrompt.trim() ? (
-            <p className="text-xs text-[var(--ink-soft)]">
-              当前将使用自动提示词：
-              <span className="mt-1 block rounded-md bg-white/80 px-2 py-1.5 text-[11px] leading-5 text-[var(--ink)]">
-                {autoCoverPrompt.slice(0, 180)}
-                {autoCoverPrompt.length > 180 ? "…" : ""}
-              </span>
-            </p>
-          ) : null}
-        </div>
-
-        <div className="mt-4 rounded-xl border border-dashed border-[var(--ink-soft)]/25 bg-white/55 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-medium text-[var(--ink)]">参考图（可选）</p>
-              <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-                不上传也能生成；上传后会按「提示词 + 图片」一起出图
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => fileRef.current?.click()}
-              >
-                <Upload className="size-3.5" />
-                上传图片
-              </Button>
-              {(refFile || refPreview || refUrl) && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    onPickFile(null);
-                    setRefUrl("");
-                    setMode("text");
-                  }}
-                >
-                  <X className="size-3.5" />
-                  清除
-                </Button>
-              )}
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
-
-          {refPreview ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={refPreview}
-              alt="参考图预览"
-              className="mt-3 max-h-40 rounded-lg object-contain"
-            />
-          ) : null}
-
-          <div className="mt-3 space-y-2">
-            <Label htmlFor="refurl">或填写公网图片链接（可选）</Label>
-            <Input
-              id="refurl"
-              value={refUrl}
-              onChange={(e) => {
-                setRefUrl(e.target.value);
-                if (e.target.value.trim()) setMode("ref");
-              }}
-              className="bg-white/80"
-              placeholder="https://…"
-            />
-          </div>
         </div>
 
         <Button
@@ -539,38 +505,19 @@ export function GeneratePanel() {
             <div className="px-4 py-16 text-center text-sm text-[var(--ink-soft)]">
               正在生成，请稍候…
             </div>
-          ) : imgError ? (
-            <div className="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-[var(--ink-soft)]">
-              <ImageIcon className="size-8 opacity-50" />
-              <p>图片加载失败（免费接口可能限流）。可改提示词后重试，或切换备用线路。</p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setUseAlt((v) => !v);
-                  setImgError(false);
-                }}
-              >
-                切换备用线路
-              </Button>
-            </div>
-          ) : (
+          ) : resultUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              key={displayUrl}
-              src={displayUrl}
+              key={resultUrl}
+              src={resultUrl}
               alt="生成的封面图"
               className="mx-auto max-h-[480px] w-full object-contain"
-              onError={() => {
-                if (mode === "text" && !useAlt) {
-                  setUseAlt(true);
-                  setImgError(false);
-                } else {
-                  setImgError(true);
-                }
-              }}
             />
+          ) : (
+            <div className="flex flex-col items-center gap-3 px-4 py-12 text-center text-sm text-[var(--ink-soft)]">
+              <ImageIcon className="size-8 opacity-50" />
+              <p>点「生成封面」即可出图</p>
+            </div>
           )}
         </div>
       </div>

@@ -1,26 +1,37 @@
 import type { CalendarPost } from "./year-calendar";
 import { pillarLabel } from "./persona";
 
-/** Xiaohongshu-ish cover ratio */
+/** Xiaohongshu-ish cover ratio (best-effort; Cloudflare flux is near-square) */
 const WIDTH = 1080;
 const HEIGHT = 1440;
+const SIZE = `${WIDTH}x${HEIGHT}`;
+
+export type CoverProvider = "cloudflare" | "siliconflow" | "pollinations";
+
+export type CoverCredentials = {
+  provider: CoverProvider;
+  cloudflareAccountId?: string;
+  cloudflareToken?: string;
+  siliconflowKey?: string;
+  pollinationsKey?: string;
+};
 
 export function buildCoverPrompt(post: CalendarPost): string {
   const mood =
     post.format === "tips"
-      ? "clean editorial flat lay notebook checklist"
+      ? "clean editorial flat lay notebook checklist, minimal props"
       : post.format === "emotion"
-        ? "soft natural window light candid lifestyle photo"
-        : "documentary style authentic lifestyle photography";
+        ? "soft natural window light candid lifestyle scene"
+        : "documentary style authentic lifestyle scene";
 
   return [
-    "Xiaohongshu cover image, vertical 3:4",
-    "Chinese woman in her late 30s job seeking life restart theme",
+    "Xiaohongshu vertical cover 3:4",
     `topic: ${post.titleHint}`,
     `pillar: ${pillarLabel(post.pillar)}`,
     mood,
-    "warm paper tones, coral accent, no purple neon, no text overlay, no watermark, no logo",
-    "realistic, tasteful, not stock-photo smile",
+    "warm paper tones, soft coral accent optional",
+    "no purple neon, no text overlay, no watermark, no logo",
+    "tasteful, not stock-photo smile, only include a person if the topic clearly needs one",
   ].join(", ");
 }
 
@@ -46,113 +57,136 @@ function resolvePrompt(
   return forImg2Img ? buildImg2ImgPrompt(post) : buildCoverPrompt(post);
 }
 
-export function buildCoverImageUrl(
-  post: CalendarPost,
-  options?: { seed?: number; prompt?: string },
-): string {
-  const prompt = resolvePrompt(post, options?.prompt, false);
-  const seed = options?.seed ?? hashSeed(post.id + prompt.slice(0, 24));
-  const params = new URLSearchParams({
-    width: String(WIDTH),
-    height: String(HEIGHT),
-    model: "flux",
-    seed: String(seed),
-    nologo: "true",
-    enhance: "true",
-  });
-
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
-}
-
-export function buildCoverImageUrlAlt(
-  post: CalendarPost,
-  options?: { seed?: number; prompt?: string },
-): string {
-  const prompt = resolvePrompt(post, options?.prompt, false);
-  const seed = options?.seed ?? hashSeed(post.id + prompt.slice(0, 24)) + 7;
-  const params = new URLSearchParams({
-    model: "flux",
-    width: String(WIDTH),
-    height: String(HEIGHT),
-    seed: String(seed),
-  });
-  return `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?${params.toString()}`;
-}
-
-/** Text+reference via GET (needs a publicly reachable image URL). */
-export function buildImg2ImgUrl(
-  post: CalendarPost,
-  referenceImageUrl: string,
-  options?: { seed?: number; prompt?: string },
-): string {
-  const prompt = resolvePrompt(post, options?.prompt, true);
-  const seed =
-    options?.seed ?? hashSeed(post.id + referenceImageUrl.slice(-12) + prompt.slice(0, 16));
-  const params = new URLSearchParams({
-    model: "kontext",
-    image: referenceImageUrl,
-    width: String(WIDTH),
-    height: String(HEIGHT),
-    seed: String(seed),
-    nologo: "true",
-  });
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
-}
-
-/**
- * Upload a local reference file and request an edited cover.
- * Uses Pollinations OpenAI-compatible edits endpoint.
- */
-export async function editCoverFromFile(
-  post: CalendarPost,
-  file: File,
-  options?: { seed?: number; prompt?: string; signal?: AbortSignal },
-): Promise<string> {
-  const prompt = resolvePrompt(post, options?.prompt, true);
-  const compressed = await compressImageFile(file, 1280, 0.85);
-
-  const form = new FormData();
-  form.append("image", compressed, compressed.name || "reference.jpg");
-  form.append("prompt", prompt);
-  form.append("model", "kontext");
-  form.append("size", `${WIDTH}x${HEIGHT}`);
-  if (options?.seed != null) form.append("seed", String(options.seed));
-
-  // Local Next.js proxy avoids browser CORS with Pollinations
-  const res = await fetch("/api/cover-edit", {
-    method: "POST",
-    body: form,
-    signal: options?.signal,
-  });
-
+async function parseImageResponse(res: Response): Promise<string> {
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
     const detail =
       typeof payload === "object" && payload && "error" in payload
         ? String((payload as { error?: string }).error ?? "")
         : "";
-    throw new Error(
-      `图生图失败 (${res.status})。${
-        detail || "请稍后重试，或改用公网图片链接 + 提示词生成。"
-      }`,
-    );
+    throw new Error(detail || `生图失败 (${res.status})。请稍后重试。`);
   }
 
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     const json = (await res.json()) as {
       data?: { b64_json?: string; url?: string }[];
-      error?: string;
+      error?: string | { message?: string };
     };
-    if (json.error) throw new Error(json.error);
+    if (json.error) {
+      throw new Error(
+        typeof json.error === "string"
+          ? json.error
+          : json.error.message || "生图失败",
+      );
+    }
     const first = json.data?.[0];
     if (first?.url) return first.url;
-    if (first?.b64_json) return `data:image/png;base64,${first.b64_json}`;
+    if (first?.b64_json) {
+      const raw = first.b64_json;
+      if (raw.startsWith("data:")) return raw;
+      return `data:image/jpeg;base64,${raw}`;
+    }
     throw new Error("接口未返回图片数据");
   }
 
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+
+/** Text-to-image via local multi-provider proxy. */
+export async function generateCoverImage(
+  post: CalendarPost,
+  options?: {
+    seed?: number;
+    prompt?: string;
+    referenceImageUrl?: string;
+    credentials?: CoverCredentials;
+    signal?: AbortSignal;
+  },
+): Promise<string> {
+  const creds = options?.credentials;
+  const provider = creds?.provider ?? "cloudflare";
+  const forImg2Img = Boolean(options?.referenceImageUrl?.trim());
+  const prompt = resolvePrompt(post, options?.prompt, forImg2Img);
+  const seed = options?.seed ?? hashSeed(post.id + prompt.slice(0, 24));
+
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  if (provider === "cloudflare" && creds?.cloudflareToken) {
+    headers["x-cloudflare-token"] = creds.cloudflareToken;
+  }
+  if (provider === "siliconflow" && creds?.siliconflowKey) {
+    headers["x-siliconflow-key"] = creds.siliconflowKey;
+  }
+  if (provider === "pollinations" && creds?.pollinationsKey) {
+    headers["x-pollinations-key"] = creds.pollinationsKey;
+  }
+
+  const res = await fetch("/api/cover-generate", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      prompt,
+      provider,
+      size: SIZE,
+      seed,
+      cloudflareAccountId: creds?.cloudflareAccountId,
+      cloudflareToken: creds?.cloudflareToken,
+      apiKey:
+        provider === "siliconflow"
+          ? creds?.siliconflowKey
+          : provider === "pollinations"
+            ? creds?.pollinationsKey
+            : undefined,
+      ...(forImg2Img
+        ? { image: options!.referenceImageUrl!.trim() }
+        : {}),
+    }),
+    signal: options?.signal,
+  });
+
+  return parseImageResponse(res);
+}
+
+/**
+ * Upload a local reference file for img2img via local proxy (Cloudflare by default).
+ */
+export async function editCoverFromFile(
+  post: CalendarPost,
+  file: File,
+  options?: {
+    seed?: number;
+    prompt?: string;
+    credentials?: CoverCredentials;
+    signal?: AbortSignal;
+  },
+): Promise<string> {
+  const prompt = resolvePrompt(post, options?.prompt, true);
+  const compressed = await compressImageFile(file, 1024, 0.85);
+  const provider = options?.credentials?.provider ?? "cloudflare";
+
+  const form = new FormData();
+  form.append("image", compressed, compressed.name || "reference.jpg");
+  form.append("prompt", prompt);
+  form.append("provider", provider);
+  form.append("strength", "0.65");
+  if (options?.seed != null) form.append("seed", String(options.seed));
+
+  const headers: HeadersInit = {};
+  if (provider === "pollinations" && options?.credentials?.pollinationsKey) {
+    headers["x-pollinations-key"] = options.credentials.pollinationsKey;
+  }
+  if (provider === "cloudflare" && options?.credentials?.cloudflareToken) {
+    headers["x-cloudflare-token"] = options.credentials.cloudflareToken;
+  }
+
+  const res = await fetch("/api/cover-edit", {
+    method: "POST",
+    headers,
+    body: form,
+    signal: options?.signal,
+  });
+  return parseImageResponse(res);
 }
 
 export async function compressImageFile(

@@ -113,19 +113,42 @@ function humanAngle(angle: string): string {
   text = text
     .replace(/^现在时开场[：:]*/, "")
     .replace(/^用极具体的一天动作[，,]*/, "")
-    .replace(/^把「?([^」]+)」?拆成.*/, "先把「$1」拆小")
+    .replace(/^把「?([^」]+)」?拆成.*/, "先把「$1」拆小一点来做")
     .replace(/只用一段回看离职动机/, "先用一段话把离职原因说清楚")
     .replace(/代替空泛重启宣言/, "少喊口号，多写当天真实动作")
     .replace(/对外介绍怎么说，才不像在辩解/, "对外介绍时，少辩解，多讲事实")
     .replace(/用「停止清单」建立边界感/, "先列一份停止清单，守住边界")
     .replace(/事实层\/能力层\/匹配层，避免情绪辩护/, "先讲事实，再讲能力，最后讲匹配")
     .replace(/用履历密度回答稳定性，不承诺感动/, "用履历密度证明稳定，不靠感动")
-    .replace(/删改前后对照（脱敏），只留可验证结果/, "删掉空形容词，只留能被验证的结果")
+    .replace(/删改前后对照（脱敏），只留可验证结果/, "删掉空话，只留能被验证的结果")
     .replace(/用一份JD拆解反推简历条目/, "对着一份JD，反推简历该怎么写")
     .replace(/数量下降、回复质量上升的一周记录/, "少海投，提高回复质量")
+    .replace(/休息规则防耗竭/, "给休息定一条规则，免得把自己耗干")
+    .replace(/防耗竭/, "别把自己耗干")
+    .replace(/建立节律/, "把作息先稳住")
+    .replace(/生活节律/, "日常作息")
+    .replace(/空泛/, "")
     .trim();
   if (!text) return "先把眼前这一步做清楚";
   return stripPeriod(text);
+}
+
+/** Speakable identity — never dump planner stage jargon. */
+function humanStage(stage: string): string {
+  const s = stage.trim();
+  if (!s) return "";
+  if (/认真过日常|节律、关系与小选择/.test(s)) {
+    return "认真过自己的日常";
+  }
+  if (/求职|找工作|离职|空白期/.test(s)) {
+    return s.replace(/[：:].*$/, "").trim() || "正在找下一步";
+  }
+  // Drop colon-tail jargon: "xxx：aaa、bbb与ccc" → "xxx"
+  if (/[：:]/.test(s)) {
+    const head = s.split(/[：:]/)[0].trim();
+    if (head && head.length <= 16) return head;
+  }
+  return s.length > 24 ? `${s.slice(0, 22)}…` : s;
 }
 
 function sceneByPillar(post: CalendarPost, seed: number): string {
@@ -141,8 +164,8 @@ function sceneByPillar(post: CalendarPost, seed: number): string {
       "年龄框一跳出来，手指会先顿一下。",
     ],
     resume: [
-      "文档第N版打开时，我先删掉了一排形容词。",
-      "改到一半，我突然意识到：写满不等于写清。",
+      "文档又开到新一版，我先删掉了一排空话。",
+      "改到一半才发现：写满不等于写清。",
       "发出去前，我只留能被追问的那几句。",
     ],
     interview: [
@@ -151,7 +174,7 @@ function sceneByPillar(post: CalendarPost, seed: number): string {
       "结束后走路回家，脑子还在回放某一句。",
     ],
     rejection: [
-      "「已读不回」跳出的瞬间，胃先紧了一下。",
+      "「已读不回」弹出的瞬间，胃先紧了一下。",
       "拒信很短，短到我连生气都来不及。",
       "刷新到第三次，我把手机扣过去了。",
     ],
@@ -236,9 +259,9 @@ function buildHook(title: string, post: CalendarPost, seed: number): string {
   if (post.format === "tips") {
     return pick(
       [
-        `${t}。\n别先加量，先改方法。`,
+        `关于「${t}」，\n我想把能直接用的几步写清楚。`,
         `如果你也在为「${t}」反复内耗，\n这篇给你能直接抄的三步。`,
-        `${t}。\n我试过很多无效努力，最后只留下这几条。`,
+        `${t}。\n我试过不少弯路，最后只留下这几条。`,
       ],
       seed,
     );
@@ -266,9 +289,56 @@ function buildHook(title: string, post: CalendarPost, seed: number): string {
 
 function buildIdentity(post: CalendarPost, persona: CreatorPersona): string {
   if (post.trustAnchor) return endSentence(post.trustAnchor);
-  const line = personaIdentityLine(persona);
-  if (line) return endSentence(line);
-  return endSentence(persona.name);
+  const bits = [
+    persona.age ? `${persona.age}岁` : null,
+    persona.background || null,
+    humanStage(persona.stage),
+  ].filter(Boolean);
+  if (bits.length) return endSentence(bits.join("，"));
+  if (persona.name) return endSentence(persona.name);
+  return "";
+}
+
+/** Pillar-aware actionable steps — never dump resume jargon into life posts. */
+function defaultSteps(post: CalendarPost, angleLine: string): string[] {
+  if (post.pillar === "life" || post.format === "emotion") {
+    return [
+      endSentence(`先承认这件事难：「${angleLine}」`),
+      "当天只选一件小事做完，做完就停，不追加任务。",
+      "睡前用一句话记下：今天哪里松了，哪里还紧。",
+    ];
+  }
+  if (post.pillar === "resume") {
+    return [
+      endSentence(angleLine),
+      "每句话改成「做了什么 + 结果是什么」，少写空话。",
+      "改完大声读一遍：别人能不能 30 秒听懂。",
+    ];
+  }
+  if (post.pillar === "interview") {
+    return [
+      endSentence(angleLine),
+      "把自我介绍压到 60 秒，只留能被追问的事实。",
+      "模拟一题难问题，录音听自己有没有在辩解。",
+    ];
+  }
+  return [
+    endSentence(angleLine),
+    "把大问题拆成今天就能做完的一小步。",
+    "做完立刻记结果：有用就留下，没用就丢掉。",
+  ];
+}
+
+function uniqueLines(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    const key = stripPeriod(line).replace(/\s+/g, "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+  }
+  return out;
 }
 
 function buildTipsBody(
@@ -280,22 +350,36 @@ function buildTipsBody(
 ): string {
   const t = cleanTitle(title);
   const angleLine = humanAngle(post.angle);
-  const rawSteps = bits.length
-    ? bits.slice(0, 3).map((b) => endSentence(stripPeriod(b)))
-    : [
-        endSentence(angleLine),
-        "每句话改成「做了什么 + 结果是什么」，少写形容词。",
-        "改完大声读一遍：别人能不能 30 秒听懂。",
-      ];
-  while (rawSteps.length < 3) {
-    const fillers = [
-      endSentence(angleLine),
-      "一次只改一个变量，改完再看反馈。",
-      "把形容词删掉，留下能被追问的事实。",
-    ];
-    rawSteps.push(fillers[rawSteps.length]);
+  const realBits = uniqueLines(bits.map((b) => endSentence(stripPeriod(b))));
+
+  // 「这周真实发生」用第一条素材；步骤里不再重复同一句
+  const happened = realBits[0] || null;
+  const stepPool = uniqueLines([
+    ...realBits.slice(happened ? 1 : 0),
+    ...defaultSteps(post, angleLine),
+  ]).slice(0, 3);
+  while (stepPool.length < 3) {
+    stepPool.push(...defaultSteps(post, angleLine).slice(stepPool.length));
   }
-  const steps = rawSteps.slice(0, 3).map((b, i) => `${i + 1}. ${b}`);
+  const steps = stepPool.slice(0, 3).map((b, i) => `${i + 1}. ${b}`);
+
+  const pitfall = pick(
+    [
+      "我以前一着急，就想一天补完所有欠账。\n结果越补越乱。",
+      "无效的是：一边休息一边愧疚刷手机。\n有效的是：休息就好好休息，开工就只做一件。",
+      "我以前总想「全面升级」。\n现在只要求：今天推进一格，就算赢。",
+    ],
+    seed + 3,
+  );
+
+  const reminder = pick(
+    [
+      `所以我现在只抓住一件事：${endSentence(angleLine)}`,
+      `这周我对自己说：${endSentence(angleLine)}`,
+      `落到「${t}」，我只做这一步：${endSentence(angleLine)}`,
+    ],
+    seed + 5,
+  );
 
   return [
     buildHook(title, post, seed),
@@ -305,26 +389,22 @@ function buildTipsBody(
     painByFormat(post, seed + 1),
     sceneByPillar(post, seed + 2),
     "",
-    bits[0]
-      ? `这周真实发生的是：\n${endSentence(bits[0])}`
+    happened
+      ? `这周真实发生的是：\n${happened}`
       : `围绕「${t}」，我这周只做一件事：\n${endSentence(angleLine)}`,
     "",
     "后来我留下的做法只有这几条：",
     ...steps,
     "",
-    pick(
-      [
-        "踩过的坑：一着急就想一次证明所有价值。\n结果写得又满又空。",
-        "无效的做法：同时改太多变量。\n有效的做法：一次只改一个。",
-        "我以前总想「全面升级」。\n现在只要求：今天推进一格，就算赢。",
-      ],
-      seed + 3,
-    ),
+    pitfall,
     "",
-    `我提醒自己：${endSentence(angleLine)}`,
+    reminder,
     "",
     ctaByFormat(post, seed + 4),
-  ].join("\n");
+  ]
+    .filter((line) => line !== "")
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 function buildEmotionBody(

@@ -1,4 +1,25 @@
+/** @deprecated Prefer defaultCalendarStart() — kept for import compatibility. */
 export const CALENDAR_START = "2026-09-09";
+
+/** Next Monday on/after today (local), so week 1 never starts in the past. */
+export function defaultCalendarStart(from = new Date()): string {
+  const y = from.getFullYear();
+  const m = String(from.getMonth() + 1).padStart(2, "0");
+  const d = String(from.getDate()).padStart(2, "0");
+  return mondayOnOrAfterLocal(`${y}-${m}-${d}`);
+}
+
+function mondayOnOrAfterLocal(iso: string): string {
+  const [y, m, day] = iso.split("-").map(Number);
+  const date = new Date(y, m - 1, day);
+  const dow = date.getDay();
+  const diff = dow === 0 ? 1 : dow === 1 ? 0 : 8 - dow;
+  date.setDate(date.getDate() + diff);
+  const yy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
 
 export type PhaseId = 1 | 2 | 3 | 4;
 
@@ -49,6 +70,16 @@ export type CreatorPersona = {
   noteTags: string[];
   contentMix: ContentMix;
 };
+
+/** User-saved custom personas (shown next to system presets). */
+export type SavedPersonaSlot = {
+  id: string;
+  label: string;
+  persona: CreatorPersona;
+  updatedAt: string;
+};
+
+export const MAX_SAVED_PERSONAS = 10;
 
 export const PILLARS: {
   id: PillarId;
@@ -1260,7 +1291,7 @@ export function applyEditableFields(
     .map((s) => s.trim())
     .filter(Boolean)
     .map((t) => (t.startsWith("#") ? t : `#${t}`));
-  return {
+  const next: CreatorPersona = {
     ...clonePersona(persona),
     name: fields.name.trim() || persona.name,
     age: Number(fields.age) || persona.age,
@@ -1272,6 +1303,278 @@ export function applyEditableFields(
     trustAnchors: trustAnchors.length ? trustAnchors : persona.trustAnchors,
     noteTags: noteTags.length ? noteTags : persona.noteTags,
     presetId: persona.presetId === "custom" ? "custom" : persona.presetId,
+  };
+  return ensurePersonaTopicSeeds(next);
+}
+
+/** True when every pillar seed list is empty. */
+export function topicSeedsAreEmpty(
+  seeds: Record<PillarId, TopicSeed[]>,
+): boolean {
+  return (Object.keys(seeds) as PillarId[]).every(
+    (k) => !seeds[k] || seeds[k].length === 0,
+  );
+}
+
+const DOMAIN_PACKS: { test: RegExp; label: string; nominals: string[] }[] = [
+  {
+    test: /美食|做饭|探店|下厨|烘焙|菜谱|吃货|料理|食堂|宵夜|家常菜/,
+    label: "美食",
+    nominals: [
+      "家常晚饭",
+      "菜市场砍价",
+      "一人食餐桌",
+      "探店踩雷复盘",
+      "试新锅具",
+      "半小时备菜",
+      "剩菜改造",
+      "早餐重新开工",
+      "外卖对比自制",
+      "朋友来家里吃",
+      "深夜清冰箱",
+      "学会一道拿手菜",
+      "便当出差一天",
+      "火候失误的那天",
+      "菜场时令清单",
+      "减糖不减味",
+      "厨房动线改造",
+      "分享一碗汤的理由",
+    ],
+  },
+  {
+    test: /穿搭|服饰|衣橱|搭配|逛街|买手/,
+    label: "穿搭",
+    nominals: [
+      "衣橱断舍离",
+      "一套通勤公式",
+      "旧衣重搭",
+      "鞋履护理",
+      "胶囊衣橱",
+      "显贵不显贵",
+      "季节换装",
+      "镜子前三分钟",
+    ],
+  },
+  {
+    test: /母婴|育儿|带娃|宝妈|宝爸/,
+    label: "育儿",
+    nominals: [
+      "午睡窗口",
+      "辅食第一次",
+      "带娃出门清单",
+      "情绪共情练习",
+      "大人也要休息",
+      "玩具断舍离",
+    ],
+  },
+  {
+    test: /健身|跑步|运动|减肥|训练/,
+    label: "运动",
+    nominals: [
+      "晨跑打卡",
+      "力量训练周记",
+      "拉伸十分钟",
+      "运动后饮食",
+      "停滞期复盘",
+      "装备只买必要的",
+    ],
+  },
+];
+
+const GENERIC_CREATOR_NOMINALS = [
+  "一次真实失败",
+  "本周小仪式",
+  "读者常问的问题",
+  "灵感从何而来",
+  "一小时深度工作",
+  "评论区里学到的",
+];
+
+export function personaDomainText(persona: CreatorPersona): string {
+  return [
+    persona.name,
+    persona.background,
+    persona.stage,
+    persona.audience,
+    persona.voice,
+    ...persona.noteTags,
+    ...persona.trustAnchors,
+  ].join(" ");
+}
+
+export function domainNominalsForPersona(persona: CreatorPersona): string[] {
+  const text = personaDomainText(persona);
+  if (
+    persona.contentMix === "job" ||
+    /求职|离职|重启|面试|简历|双非|找工作|大龄求职|空白期/.test(text)
+  ) {
+    return [
+      "简历删改",
+      "投递节奏",
+      "自我介绍",
+      "学历答法",
+      "拒信复盘",
+      "试岗观察",
+      "生活节律",
+      "面试故事库",
+    ];
+  }
+  if (
+    persona.contentMix === "career" ||
+    /职场成长|晋升|协作|在职|向上管理/.test(text)
+  ) {
+    return [
+      "周复盘",
+      "会议要结论",
+      "反馈拆解",
+      "边界感",
+      "可验证贡献",
+      "生活节律",
+    ];
+  }
+  for (const pack of DOMAIN_PACKS) {
+    if (pack.test.test(text)) return pack.nominals;
+  }
+  return LIFE_SEEDS.life.map((t) => t.title).concat(GENERIC_CREATOR_NOMINALS);
+}
+
+function seedFromNominal(
+  nominal: string,
+  format: TopicSeed["format"],
+  anglePrefix: string,
+): TopicSeed {
+  return {
+    title: nominal,
+    angle: `${anglePrefix}「${nominal}」`,
+    format,
+    hooks: [nominal.slice(0, 8), "真实"],
+  };
+}
+
+function seedsFromNominals(
+  nominals: string[],
+  personaName: string,
+): Record<PillarId, TopicSeed[]> {
+  const life = nominals.map((n, i) =>
+    seedFromNominal(n, i % 3 === 0 ? "tips" : "story", "用具体场景写出"),
+  );
+  const restart = nominals.slice(0, 8).map((n, i) =>
+    seedFromNominal(
+      `${personaName.replace(/博主|创作者/g, "").trim() || "创作者"}的开场：${n}`,
+      i % 2 === 0 ? "story" : "emotion",
+      "讲清你是谁，用",
+    ),
+  );
+  const choice = nominals.slice(2, 12).map((n, i) =>
+    seedFromNominal(
+      `关于「${n}」我做的取舍`,
+      i % 2 === 0 ? "tips" : "story",
+      "不讲空泛成功学，围绕",
+    ),
+  );
+  const soft = nominals.slice(4, 14).map((n) =>
+    seedFromNominal(`复盘：${n}`, "emotion", "诚实写下"),
+  );
+  return {
+    life,
+    restart,
+    choice,
+    "age-edu": soft.slice(0, 4),
+    resume: soft.slice(2, 6),
+    interview: soft.slice(1, 5),
+    rejection: soft.slice(3, 7),
+  };
+}
+
+export type BuiltPersonaSeeds = {
+  topicSeeds: Record<PillarId, TopicSeed[]>;
+  contentMix: ContentMix;
+  phases: PhaseDef[];
+};
+
+/**
+ * Build calendar seeds for a custom persona from name/stage/tags.
+ * Job / career keywords restore curated banks — never generic "做内容" topics.
+ */
+export function buildTopicSeedsFromPersona(
+  persona: CreatorPersona,
+): BuiltPersonaSeeds {
+  const text = personaDomainText(persona);
+
+  if (
+    persona.contentMix === "job" ||
+    /求职|离职|重启人生|重启求职|面试|简历|双非|找工作|大龄求职|空白期/.test(
+      text,
+    )
+  ) {
+    return {
+      topicSeeds: cloneSeeds(JOB_SEEDS),
+      contentMix: "job",
+      phases: JOB_PHASES.map((p) => ({ ...p })),
+    };
+  }
+
+  if (
+    persona.contentMix === "career" ||
+    /职场成长|晋升|协作|在职深耕|向上管理/.test(text)
+  ) {
+    return {
+      topicSeeds: cloneSeeds(CAREER_SEEDS),
+      contentMix: "career",
+      phases: CAREER_PHASES.map((p) => ({ ...p })),
+    };
+  }
+
+  for (const pack of DOMAIN_PACKS) {
+    if (pack.test.test(text)) {
+      return {
+        topicSeeds: seedsFromNominals(pack.nominals, persona.name),
+        contentMix: "life",
+        phases: LIFE_PHASES.map((p) => ({ ...p })),
+      };
+    }
+  }
+
+  // Default custom / life: real life-journal seeds, not meta "做内容" filler
+  return {
+    topicSeeds: cloneSeeds(LIFE_SEEDS),
+    contentMix: "life",
+    phases: LIFE_PHASES.map((p) => ({ ...p })),
+  };
+}
+
+/**
+ * Guarantee topic seeds match the persona type.
+ * System presets always use curated banks; custom uses domain detection.
+ */
+export function ensurePersonaTopicSeeds(
+  persona: CreatorPersona,
+): CreatorPersona {
+  const p = clonePersona(persona);
+
+  if (
+    p.presetId === "job-restart" ||
+    p.presetId === "career-growth" ||
+    p.presetId === "life-journal"
+  ) {
+    const fromPreset = getPreset(p.presetId);
+    return {
+      ...p,
+      // Always restore curated calendar seeds for system presets
+      topicSeeds: cloneSeeds(fromPreset.topicSeeds),
+      contentMix: fromPreset.contentMix,
+      phases: fromPreset.phases.map((x) => ({ ...x })),
+    };
+  }
+
+  // custom
+  const built = buildTopicSeedsFromPersona(p);
+  return {
+    ...p,
+    presetId: "custom",
+    topicSeeds: built.topicSeeds,
+    contentMix: built.contentMix,
+    phases: built.phases,
   };
 }
 

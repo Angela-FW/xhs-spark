@@ -1,6 +1,8 @@
 import {
   CALENDAR_START,
   defaultPostsPerWeek,
+  domainNominalsForPersona,
+  ensurePersonaTopicSeeds,
   phaseForWeek,
   personaHookTag,
   type ContentMix,
@@ -19,6 +21,15 @@ export type PostMaterial = {
   sourceInsightId?: string;
 };
 
+/** Saved generate-panel draft, restored when reopening 生成. */
+export type PostDraft = {
+  titles: string[];
+  titleIndex: number;
+  body: string;
+  tags: string[];
+  extra?: string;
+};
+
 export type CalendarPost = {
   id: string;
   week: number;
@@ -32,7 +43,10 @@ export type CalendarPost = {
   trustAnchor?: string;
   materials: PostMaterial[];
   status: PostStatus;
+  /** Real local YYYY-MM-DD when marked published; frozen thereafter. */
+  publishedAt?: string;
   format: "story" | "tips" | "emotion";
+  draft?: PostDraft;
 };
 
 export type WeekPlan = {
@@ -49,18 +63,50 @@ export type YearCalendar = {
   posts: CalendarPost[];
 };
 
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+export function parseLocalYmd(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
-function mondayOnOrBefore(iso: string): string {
-  const d = new Date(`${iso}T00:00:00`);
+export function formatLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function todayLocal(from = new Date()): string {
+  return formatLocalYmd(from);
+}
+
+export function addDays(iso: string, days: number): string {
+  const d = parseLocalYmd(iso);
+  d.setDate(d.getDate() + days);
+  return formatLocalYmd(d);
+}
+
+export function diffCalendarDays(fromIso: string, toIso: string): number {
+  const from = parseLocalYmd(fromIso).getTime();
+  const to = parseLocalYmd(toIso).getTime();
+  return Math.round((to - from) / (1000 * 60 * 60 * 24));
+}
+
+/** First Monday on or after `iso` — week 1 stays in the present/future. */
+export function mondayOnOrAfter(iso: string): string {
+  const d = parseLocalYmd(iso);
   const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
+  const diff = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
   d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
+  return formatLocalYmd(d);
+}
+
+export function isCalendarStartInPast(
+  calendarStart: string,
+  today = new Date(),
+): boolean {
+  const start = parseLocalYmd(calendarStart);
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return start.getTime() < t.getTime();
 }
 
 function takeTopic(
@@ -70,6 +116,7 @@ function takeTopic(
   cursor: Record<PillarId, number>,
   week: number,
   indexInWeek: number,
+  persona?: CreatorPersona,
 ): TopicSeed {
   const list = seeds[pillar] ?? [];
   if (list.length) {
@@ -88,7 +135,7 @@ function takeTopic(
       guard += 1;
     }
   }
-  return synthesizeTopic(pillar, week, indexInWeek, used);
+  return synthesizeTopic(pillar, week, indexInWeek, used, persona);
 }
 
 const LIFE_NOMINALS = [
@@ -162,14 +209,21 @@ function synthesizeTopic(
   week: number,
   indexInWeek: number,
   used: Set<string>,
+  persona?: CreatorPersona,
 ): TopicSeed {
-  const pool =
-    pillar === "life"
+  const useCreatorDomain =
+    persona?.contentMix === "life" || persona?.presetId === "custom";
+  const pool = useCreatorDomain
+    ? domainNominalsForPersona(persona!)
+    : pillar === "life"
       ? LIFE_NOMINALS
       : JOB_NOMINALS[pillar as Exclude<PillarId, "life">];
   const nominal = pool[(week * 3 + indexInWeek) % pool.length];
-  let title =
-    pillar === "life"
+  let title = useCreatorDomain
+    ? pillar === "life" || pillar === "restart"
+      ? `第${week}周｜${nominal}`
+      : `第${week}周取舍｜${nominal}`
+    : pillar === "life"
       ? `第${week}周生活切片：${nominal}`
       : `第${week}周｜${nominal}（不重复纪录 ${week}-${indexInWeek + 1}）`;
   let n = 2;
@@ -180,11 +234,19 @@ function synthesizeTopic(
   used.add(title);
   return {
     title,
-    angle:
-      pillar === "life"
+    angle: useCreatorDomain
+      ? `围绕「${nominal}」写出可执行的一周动作，贴合「${persona?.name || "创作者"}」人设`
+      : pillar === "life"
         ? `用「${nominal}」这一件具体事丰满人物形象，轻连主线但不抢戏`
         : `围绕「${nominal}」给出当周可执行动作与一句信任锚点`,
-    format: pillar === "life" ? "story" : week % 2 === 0 ? "tips" : "story",
+    format:
+      useCreatorDomain || pillar === "life"
+        ? week % 3 === 0
+          ? "tips"
+          : "story"
+        : week % 2 === 0
+          ? "tips"
+          : "story",
     hooks: [nominal, `W${week}`],
   };
 }
@@ -197,13 +259,14 @@ function pillarForSlot(
   mix: ContentMix,
 ): PillarId {
   if (mix === "life") {
+    // Stay in life-domain pillars — never spice with resume/interview/谈薪.
     if (phase === 1) {
-      const seq: PillarId[] = ["life", "restart", "life", "choice"];
+      const seq: PillarId[] = ["life", "restart", "life", "life"];
       return seq[(week - 1) % seq.length];
     }
-    if (indexInWeek === 0 && week % 3 !== 0) return "life";
-    if (indexInWeek === postsPerWeek - 1) return "life";
-    const spice: PillarId[] = ["choice", "rejection", "resume", "interview", "life"];
+    if (indexInWeek === 0) return "life";
+    if (indexInWeek === postsPerWeek - 1 && week % 2 === 0) return "choice";
+    const spice: PillarId[] = ["life", "life", "restart", "choice", "life"];
     return spice[(week + indexInWeek) % spice.length];
   }
 
@@ -251,15 +314,89 @@ function pillarForSlot(
   return wrap[(week + indexInWeek) % wrap.length];
 }
 
+export function buildWeekPosts(options: {
+  week: number;
+  weekStart: string;
+  persona?: CreatorPersona;
+  usedTitles?: Set<string>;
+  cursor?: Record<PillarId, number>;
+}): { week: WeekPlan; posts: CalendarPost[] } {
+  const ready = options.persona
+    ? ensurePersonaTopicSeeds(options.persona)
+    : undefined;
+  const week = options.week;
+  const weekStart = options.weekStart;
+  const usedTitles = options.usedTitles ?? new Set<string>();
+  const cursor =
+    options.cursor ??
+    ({
+      restart: week * 2,
+      "age-edu": week * 2,
+      resume: week * 2,
+      interview: week * 2,
+      rejection: week * 2,
+      choice: week * 2,
+      life: week * 2,
+    } as Record<PillarId, number>);
+  const seeds = ready?.topicSeeds;
+  const mix = ready?.contentMix ?? "job";
+  const trustAnchors = ready?.trustAnchors?.length
+    ? ready.trustAnchors
+    : ["我只写这一周真实发生的动作"];
+  const hookTag = ready ? personaHookTag(ready) : "创作者";
+  const phase = phaseForWeek(week, ready);
+  const postsPerWeek = defaultPostsPerWeek(week);
+  const weekPosts: CalendarPost[] = [];
+
+  for (let i = 0; i < postsPerWeek; i++) {
+    const pillar = pillarForSlot(phase, week, i, postsPerWeek, mix);
+    const topic = seeds
+      ? takeTopic(pillar, seeds, usedTitles, cursor, week, i, ready)
+      : synthesizeTopic(pillar, week, i, usedTitles, ready);
+    const trustAnchor =
+      pillar === "life" || (phase === 1 && topic.format === "story")
+        ? undefined
+        : trustAnchors[(week + i) % trustAnchors.length];
+
+    weekPosts.push({
+      id: `w${week}-p${i + 1}`,
+      week,
+      weekStart,
+      indexInWeek: i,
+      phase,
+      pillar,
+      titleHint: topic.title,
+      angle: topic.angle,
+      hooks: [...topic.hooks, hookTag],
+      trustAnchor,
+      materials: [],
+      status: "planned",
+      format: topic.format,
+    });
+  }
+
+  return {
+    week: {
+      week,
+      weekStart,
+      phase,
+      postsPerWeek,
+      posts: weekPosts,
+    },
+    posts: weekPosts,
+  };
+}
+
 export function buildYearCalendar(
   startDate: string = CALENDAR_START,
   persona?: CreatorPersona,
+  weekCount = 52,
 ): YearCalendar {
-  const weekStart0 = mondayOnOrBefore(startDate);
+  const ready = persona ? ensurePersonaTopicSeeds(persona) : undefined;
+  const weekStart0 = mondayOnOrAfter(startDate);
   const weeks: WeekPlan[] = [];
   const posts: CalendarPost[] = [];
   const usedTitles = new Set<string>();
-  const seeds = persona?.topicSeeds;
   const cursor = {
     restart: 0,
     "age-edu": 0,
@@ -269,48 +406,18 @@ export function buildYearCalendar(
     choice: 0,
     life: 0,
   } as Record<PillarId, number>;
-  const mix = persona?.contentMix ?? "job";
-  const trustAnchors = persona?.trustAnchors?.length
-    ? persona.trustAnchors
-    : ["我只写这一周真实发生的动作"];
-  const hookTag = persona ? personaHookTag(persona) : "创作者";
 
-  for (let week = 1; week <= 52; week++) {
+  for (let week = 1; week <= weekCount; week++) {
     const weekStart = addDays(weekStart0, (week - 1) * 7);
-    const phase = phaseForWeek(week, persona);
-    const postsPerWeek = defaultPostsPerWeek(week);
-    const weekPosts: CalendarPost[] = [];
-
-    for (let i = 0; i < postsPerWeek; i++) {
-      const pillar = pillarForSlot(phase, week, i, postsPerWeek, mix);
-      const topic = seeds
-        ? takeTopic(pillar, seeds, usedTitles, cursor, week, i)
-        : synthesizeTopic(pillar, week, i, usedTitles);
-      const trustAnchor =
-        pillar === "life" || (phase === 1 && topic.format === "story")
-          ? undefined
-          : trustAnchors[(week + i) % trustAnchors.length];
-
-      const post: CalendarPost = {
-        id: `w${week}-p${i + 1}`,
-        week,
-        weekStart,
-        indexInWeek: i,
-        phase,
-        pillar,
-        titleHint: topic.title,
-        angle: topic.angle,
-        hooks: [...topic.hooks, hookTag],
-        trustAnchor,
-        materials: [],
-        status: "planned",
-        format: topic.format,
-      };
-      weekPosts.push(post);
-      posts.push(post);
-    }
-
-    weeks.push({ week, weekStart, phase, postsPerWeek, posts: weekPosts });
+    const built = buildWeekPosts({
+      week,
+      weekStart,
+      persona: ready,
+      usedTitles,
+      cursor,
+    });
+    weeks.push(built.week);
+    posts.push(...built.posts);
   }
 
   const titles = posts.map((p) => p.titleHint);
@@ -318,5 +425,5 @@ export function buildYearCalendar(
     console.warn("calendar title collision detected");
   }
 
-  return { startDate, weeks, posts };
+  return { startDate: weekStart0, weeks, posts };
 }

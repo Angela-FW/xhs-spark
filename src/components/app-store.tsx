@@ -16,17 +16,24 @@ import {
   type PendingCalibration,
   attachMaterial,
   createInitialState,
+  deleteSavedPersona,
   exportState,
   importState,
   loadState,
+  appendNextCalendarWeek,
   rebuildCalendarFromPersona,
+  rollUnpublishedSchedule,
+  savePostDraft,
   saveState,
+  selectSavedPersona,
+  setPostPublishStatus,
   updatePersonaFields,
-  updatePost,
+  upsertSavedPersona,
 } from "@/lib/store";
 import { applyPending, proposeFromFeedback, undoLastSnapshot } from "@/lib/calibrate";
 import { parseDialogue } from "@/lib/dialogue";
 import type { CreatorPersona } from "@/lib/persona";
+import { getPreset, type PresetId } from "@/lib/persona";
 
 type StoreApi = {
   state: AppState;
@@ -39,6 +46,16 @@ type StoreApi = {
     postId: string,
     status: "planned" | "drafted" | "published",
   ) => void;
+  saveDraft: (
+    postId: string,
+    draft: {
+      titles: string[];
+      titleIndex: number;
+      body: string;
+      tags: string[];
+      extra?: string;
+    },
+  ) => void;
   submitFeedback: (entry: Omit<FeedbackEntry, "id" | "createdAt">) => void;
   setPending: (pending: PendingCalibration | null) => void;
   confirmPending: () => void;
@@ -47,6 +64,19 @@ type StoreApi = {
   sendDialogue: (text: string) => void;
   updatePersona: (persona: CreatorPersona) => void;
   applyPersonaAndRebuild: (persona: CreatorPersona) => void;
+  applySystemPreset: (id: PresetId) => void;
+  savePersonaToList: (
+    persona?: CreatorPersona,
+    label?: string,
+  ) => string | null;
+  savePersonaToListAndRebuild: (
+    persona: CreatorPersona,
+    label?: string,
+  ) => string | null;
+  removeSavedPersona: (id: string) => void;
+  pickSavedPersona: (id: string) => void;
+  startBlankCustom: () => void;
+  generateMoreWeek: () => void;
   exportJson: () => string;
   importJson: (json: string) => void;
   resetAll: () => void;
@@ -72,6 +102,25 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setHydrated(true);
     }
   }, []);
+
+  // Roll unpublished schedule when the local day changes (tab focus / midnight).
+  useEffect(() => {
+    if (!hydrated) return;
+    const sync = () => {
+      setState((s) => rollUnpublishedSchedule(s));
+    };
+    const onVis = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    window.addEventListener("focus", sync);
+    document.addEventListener("visibilitychange", onVis);
+    const id = window.setInterval(sync, 60_000);
+    return () => {
+      window.removeEventListener("focus", sync);
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(id);
+    };
+  }, [hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -117,7 +166,23 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const setPostStatus = useCallback(
     (postId: string, status: "planned" | "drafted" | "published") => {
-      setState((s) => updatePost(s, postId, { status }));
+      setState((s) => setPostPublishStatus(s, postId, status));
+    },
+    [],
+  );
+
+  const saveDraft = useCallback(
+    (
+      postId: string,
+      draft: {
+        titles: string[];
+        titleIndex: number;
+        body: string;
+        tags: string[];
+        extra?: string;
+      },
+    ) => {
+      setState((s) => savePostDraft(s, postId, draft));
     },
     [],
   );
@@ -189,6 +254,78 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((s) => rebuildCalendarFromPersona(s, persona));
   }, []);
 
+  const applySystemPreset = useCallback((id: PresetId) => {
+    const next = getPreset(id);
+    setState((s) =>
+      rebuildCalendarFromPersona(
+        { ...s, activeSavedPersonaId: null },
+        next,
+      ),
+    );
+  }, []);
+
+  const savePersonaToList = useCallback(
+    (persona?: CreatorPersona, label?: string) => {
+      let savedId: string | null = null;
+      setState((s) => {
+        const result = upsertSavedPersona(s, persona ?? s.persona, {
+          id: s.activeSavedPersonaId,
+          label: label || persona?.name,
+        });
+        if (result.error) {
+          alert(result.error);
+          return s;
+        }
+        savedId = result.id ?? null;
+        return result.state;
+      });
+      return savedId;
+    },
+    [],
+  );
+
+  const savePersonaToListAndRebuild = useCallback(
+    (persona: CreatorPersona, label?: string) => {
+      let savedId: string | null = null;
+      setState((s) => {
+        const result = upsertSavedPersona(s, persona, {
+          id: s.activeSavedPersonaId,
+          label: label || persona.name,
+        });
+        if (result.error) {
+          alert(result.error);
+          return s;
+        }
+        savedId = result.id ?? null;
+        return rebuildCalendarFromPersona(result.state, result.state.persona);
+      });
+      return savedId;
+    },
+    [],
+  );
+
+  const removeSavedPersona = useCallback((id: string) => {
+    setState((s) => deleteSavedPersona(s, id));
+  }, []);
+
+  const pickSavedPersona = useCallback((id: string) => {
+    setState((s) => selectSavedPersona(s, id));
+  }, []);
+
+  const startBlankCustom = useCallback(() => {
+    const blank = getPreset("custom");
+    setState((s) =>
+      rebuildCalendarFromPersona(
+        { ...s, activeSavedPersonaId: null },
+        blank,
+      ),
+    );
+  }, []);
+
+  const generateMoreWeek = useCallback(() => {
+    setState((s) => appendNextCalendarWeek(s));
+  }, []);
+
   const exportJson = useCallback(() => exportState(state), [state]);
 
   const importJson = useCallback((json: string) => {
@@ -208,6 +345,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       deleteInsight,
       assignInsight,
       setPostStatus,
+      saveDraft,
       submitFeedback,
       setPending,
       confirmPending,
@@ -216,6 +354,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       sendDialogue,
       updatePersona,
       applyPersonaAndRebuild,
+      applySystemPreset,
+      savePersonaToList,
+      savePersonaToListAndRebuild,
+      removeSavedPersona,
+      pickSavedPersona,
+      startBlankCustom,
+      generateMoreWeek,
       exportJson,
       importJson,
       resetAll,
@@ -228,6 +373,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       deleteInsight,
       assignInsight,
       setPostStatus,
+      saveDraft,
       submitFeedback,
       setPending,
       confirmPending,
@@ -236,6 +382,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       sendDialogue,
       updatePersona,
       applyPersonaAndRebuild,
+      applySystemPreset,
+      savePersonaToList,
+      savePersonaToListAndRebuild,
+      removeSavedPersona,
+      pickSavedPersona,
+      startBlankCustom,
+      generateMoreWeek,
       exportJson,
       importJson,
       resetAll,
