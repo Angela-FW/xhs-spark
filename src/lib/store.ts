@@ -128,7 +128,7 @@ function welcomeChat(persona: CreatorPersona): ChatMessage {
   return {
     id: "welcome",
     role: "assistant",
-    text: `你好，当前人设是「${persona.name}」。${mixHint}。可用对话微调，例如「下周多写${persona.contentMix === "life" ? "日常" : "面试"}」。`,
+    text: `你好，当前人设是「${persona.name}」。${mixHint}。`,
     createdAt: new Date().toISOString(),
   };
 }

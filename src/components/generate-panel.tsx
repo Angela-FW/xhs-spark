@@ -17,6 +17,7 @@ import {
   generateCoverImage,
 } from "@/lib/cover-image";
 import {
+  canGenerateAiCover,
   hasUsableCoverKeys,
   loadCoverKeys,
   toCoverCredentials,
@@ -71,7 +72,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const bodyReqId = useRef(0);
 
   useEffect(() => {
-    const sync = () => setKeysReady(hasUsableCoverKeys());
+    const sync = () => setKeysReady(canGenerateAiCover(loadCoverKeys()));
     sync();
     window.addEventListener("restart-cover-keys", sync);
     return () => window.removeEventListener("restart-cover-keys", sync);
@@ -265,9 +266,9 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       return;
     }
 
-    // AI 文生图：必须用户自备 Key
+    // AI 文生图：必须用当前用户自己的 Key
     const creds = toCoverCredentials(loadCoverKeys());
-    if (!hasUsableCoverKeys(creds)) {
+    if (!canGenerateAiCover(creds)) {
       setPendingCoverSeed(nextSeed ?? null);
       setKeysModalOpen(true);
       return;
@@ -401,7 +402,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
               {pillarLabel(post.pillar)}
             </p>
             <h3 className="font-display mt-1 text-lg text-[var(--ink)]">
-              {post.titleHint}
+              {selectedTitle || post.titleHint}
             </h3>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">{post.angle}</p>
           </div>
@@ -517,14 +518,14 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
 
         <p className="mb-4 text-xs text-[var(--ink-soft)]">
           {keysReady
-            ? "已配置你的文生图 Key（存在本机）。未填 Key 时点「生成封面」会弹出配置。"
-            : "文生图需使用你自己的 Key；未配置时点「生成封面」会弹出配置页。"}{" "}
+            ? "已配置你的生图 Key（登录后跨设备同步）。"
+            : "生图需填写你自己的 Key；登录后会同步到账号，不占用别人额度。"}{" "}
           <button
             type="button"
             className="text-[var(--coral-deep)] underline-offset-2 hover:underline"
             onClick={() => setKeysModalOpen(true)}
           >
-            {keysReady ? "修改 Key" : "去配置 Key"}
+            {hasUsableCoverKeys() ? "修改 Key" : "配置 Key"}
           </button>
         </p>
 

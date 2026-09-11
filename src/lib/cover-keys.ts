@@ -13,17 +13,17 @@ export const COVER_KEY_LINKS = {
   cloudflare: {
     label: "Cloudflare Workers AI",
     href: "https://dash.cloudflare.com/?to=/:account/ai/workers-ai",
-    help: "免费约 1 万 Neurons/天（约 170 张）。创建 Account ID，并申请带 Workers AI 权限的 API Token。",
+    help: "免费约 1 万 Neurons/天（约 170 张）。创建 Account ID，并申请带 Workers AI 权限的 API Token。登录后会同步到你的账号。",
   },
   siliconflow: {
     label: "硅基流动",
     href: "https://cloud.siliconflow.cn",
-    help: "注册并实名后可免费调用部分模型（有每日上限）。",
+    help: "注册并实名后可免费调用部分模型（有每日上限）。登录后会同步到你的账号。",
   },
   pollinations: {
     label: "Pollinations",
     href: "https://auth.pollinations.ai",
-    help: "备选线路；建议优先用 Cloudflare 免费额度。",
+    help: "备选线路；建议优先用 Cloudflare 免费额度。登录后会同步到你的账号。",
   },
 } as const;
 
@@ -52,7 +52,7 @@ export function saveCoverKeys(keys: StoredCoverKeys): void {
   if (typeof window === "undefined") return;
   const next: StoredCoverKeys = {
     ...keys,
-    configuredAt: new Date().toISOString(),
+    configuredAt: keys.configuredAt || new Date().toISOString(),
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event("restart-cover-keys"));
@@ -66,6 +66,22 @@ export function hasUsableCoverKeys(keys: StoredCoverKeys = loadCoverKeys()): boo
     return Boolean(keys.siliconflowKey?.trim());
   }
   return Boolean(keys.pollinationsKey?.trim());
+}
+
+/** True when Cloudflare Account ID + Token are present (for text AI too). */
+export function hasCloudflareTextKeys(
+  keys: StoredCoverKeys = loadCoverKeys(),
+): boolean {
+  return Boolean(
+    keys.cloudflareAccountId?.trim() && keys.cloudflareToken?.trim(),
+  );
+}
+
+/** Only the signed-in user's own keys — no shared site quota. */
+export function canGenerateAiCover(
+  keys: StoredCoverKeys = loadCoverKeys(),
+): boolean {
+  return hasUsableCoverKeys(keys);
 }
 
 export function toCoverCredentials(keys: StoredCoverKeys): CoverCredentials {

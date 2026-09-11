@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAuthConfigured } from "@/lib/cloud-env";
 import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -16,16 +17,29 @@ type NoteGenerateBody = {
     background?: string;
   };
   extraNote?: string;
+  cloudflareAccountId?: string;
+  cloudflareToken?: string;
 };
 
 const MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
-function accountId() {
-  return process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "";
-}
-
-function apiToken() {
-  return process.env.CLOUDFLARE_API_TOKEN?.trim() || "";
+function resolveCfCreds(
+  req: Request,
+  input: NoteGenerateBody,
+): { id: string; token: string } {
+  const id =
+    input.cloudflareAccountId?.trim() ||
+    req.headers.get("x-cloudflare-account-id")?.trim() ||
+    (!isAuthConfigured()
+      ? process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || ""
+      : "");
+  const token =
+    input.cloudflareToken?.trim() ||
+    req.headers.get("x-cloudflare-token")?.trim() ||
+    (!isAuthConfigured()
+      ? process.env.CLOUDFLARE_API_TOKEN?.trim() || ""
+      : "");
+  return { id, token };
 }
 
 function cleanMaterials(list: string[]): string[] {
@@ -44,23 +58,23 @@ export async function POST(req: Request) {
   const gate = await requireUserForAi(req);
   if (!gate.ok) return gate.response;
 
-  const id = accountId();
-  const token = apiToken();
-  if (!id || !token) {
-    return NextResponse.json(
-      {
-        error:
-          "缺少 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN。请写在项目根目录 .env.local 后重启。",
-      },
-      { status: 400 },
-    );
-  }
-
   let input: NoteGenerateBody;
   try {
     input = (await req.json()) as NoteGenerateBody;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { id, token } = resolveCfCreds(req, input);
+  if (!id || !token) {
+    return NextResponse.json(
+      {
+        error: isAuthConfigured()
+          ? "缺少你自己的 Cloudflare Key：请在生成页配置 Account ID 与 API Token（登录后会同步到账号）。"
+          : "缺少 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN。本地写在 .env.local，或在生成页填写个人 Key。",
+      },
+      { status: 400 },
+    );
   }
 
   const title = String(input.title || "").trim().slice(0, 80);

@@ -5,18 +5,25 @@ import { AppStoreProvider, useAppStore } from "@/components/app-store";
 import { AuthProvider, useAuth } from "@/components/auth-provider";
 import { CalendarBoard } from "@/components/calendar-board";
 import { InsightInbox } from "@/components/insight-inbox";
-import { DialoguePanel } from "@/components/dialogue-panel";
 import { GeneratePanel } from "@/components/generate-panel";
 import { PersonaPanel } from "@/components/persona-panel";
 import { Button } from "@/components/ui/button";
+import {
+  fetchCloudCoverKeys,
+  saveCloudCoverKeys,
+} from "@/lib/cloud-cover-keys";
 import { fetchCloudState, saveCloudState } from "@/lib/cloud-state";
+import {
+  hasUsableCoverKeys,
+  loadCoverKeys,
+  saveCoverKeys,
+} from "@/lib/cover-keys";
 import { importState } from "@/lib/store";
 
 const TABS = [
   { id: "persona", label: "人设" },
   { id: "calendar", label: "日历" },
   { id: "insights", label: "感悟" },
-  { id: "dialogue", label: "对话" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -72,6 +79,37 @@ function CloudSyncBridge() {
   return null;
 }
 
+/** Pull / push each user's own AI keys on login (never shared site quota). */
+function CoverKeysSyncBridge() {
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await fetchCloudCoverKeys(user.id);
+        if (cancelled) return;
+        const local = loadCoverKeys();
+        if (remote && hasUsableCoverKeys(remote)) {
+          saveCoverKeys(remote);
+        } else if (hasUsableCoverKeys(local)) {
+          await saveCloudCoverKeys(user.id, local);
+        } else if (remote) {
+          saveCoverKeys(remote);
+        }
+      } catch (err) {
+        console.error("cover keys sync failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  return null;
+}
+
 function PlannerInner() {
   const [tab, setTab] = useState<TabId>("calendar");
   const [generateOpen, setGenerateOpen] = useState(false);
@@ -106,6 +144,7 @@ function PlannerInner() {
   return (
     <div className="relative">
       <CloudSyncBridge />
+      <CoverKeysSyncBridge />
       <header className="hero-panel relative overflow-hidden px-[max(1.25rem,4vw)] pb-8 pt-8 sm:pt-10">
         <div className="hero-glow" aria-hidden />
         <div className="hero-grain" aria-hidden />
@@ -226,7 +265,6 @@ function PlannerInner() {
               ) : null}
               {tab === "persona" ? <PersonaPanel /> : null}
               {tab === "insights" ? <InsightInbox /> : null}
-              {tab === "dialogue" ? <DialoguePanel /> : null}
             </div>
           </>
         )}

@@ -13,9 +13,7 @@ function jsonError(message: string, status: number, detail?: string) {
 
 /**
  * Image-to-image cover edit.
- * Default: Cloudflare Workers AI (stable-diffusion img2img) using server env.
- * Optional: Pollinations when x-pollinations-key / POLLINATIONS_API_KEY is set
- * and provider=pollinations.
+ * Uses the signed-in user's own provider keys (no shared site quota).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -33,10 +31,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (provider === "pollinations") {
-      const key = req.headers.get("x-pollinations-key") || "";
+      const key = req.headers.get("x-pollinations-key")?.trim() || "";
       if (!key) {
         return jsonError(
-          "请先配置你自己的 Pollinations API Key 后再图生图。",
+          "未配置 Pollinations Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
           401,
         );
       }
@@ -72,12 +70,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Cloudflare img2img — 仅使用用户传入的凭证
-    const accountId = String(incoming.get("cloudflareAccountId") ?? "").trim();
-    const token = req.headers.get("x-cloudflare-token") || "";
+    // Cloudflare img2img — user credentials only (no shared site quota)
+    const accountId =
+      String(incoming.get("cloudflareAccountId") ?? "").trim() || "";
+    const token = req.headers.get("x-cloudflare-token")?.trim() || "";
     if (!accountId || !token) {
       return jsonError(
-        "请先配置你自己的 Cloudflare Account ID 与 API Token 后再图生图。",
+        "未配置生图 Key：请在生成页填写你自己的 Cloudflare Account ID 与 API Token（登录后会同步到账号）。",
         401,
       );
     }

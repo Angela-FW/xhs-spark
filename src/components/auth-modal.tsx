@@ -165,11 +165,11 @@ export function AuthModal({
                 className="text-left text-xs text-[var(--coral-deep)] underline-offset-2 hover:underline"
                 onClick={() => setShowKeys((v) => !v)}
               >
-                {showKeys ? "收起生图 Key 配置" : "配置生图模型 Key（可选，可稍后）"}
+                {showKeys ? "收起生图 Key 配置" : "配置生图模型 Key（登录后同步）"}
               </button>
               {showKeys ? <CoverKeysForm compact /> : (
                 <p className="text-xs text-[var(--ink-soft)]">
-                  生图需要 Cloudflare / 硅基流动等 Key。可先注册，之后在生成页再配；
+                  每人自备 Cloudflare / 硅基流动等 Key，登录后同步到账号，不占用别人额度。可先注册，之后在生成页再配；
                   <a
                     href="https://dash.cloudflare.com/?to=/:account/ai/workers-ai"
                     target="_blank"

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useAppStore } from "@/components/app-store";
-import { PendingBanner } from "@/components/dialogue-panel";
+import { PendingBanner } from "@/components/pending-banner";
 import { pillarLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

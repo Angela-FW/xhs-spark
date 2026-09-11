@@ -4,6 +4,7 @@ import {
   type GeneratedNote,
 } from "@/lib/note-gen";
 import { withAuthHeaders } from "@/lib/auth-fetch";
+import { loadCoverKeys } from "@/lib/cover-keys";
 import type { CreatorPersona } from "@/lib/persona";
 import type { CalendarPost } from "@/lib/year-calendar";
 
@@ -37,6 +38,7 @@ async function fetchNoteBodyOnce(
   title: string,
   extraNote: string,
 ): Promise<string> {
+  const keys = loadCoverKeys();
   const res = await fetch("/api/note-generate", {
     method: "POST",
     headers: await withAuthHeaders({ "Content-Type": "application/json" }),
@@ -53,6 +55,8 @@ async function fetchNoteBodyOnce(
         background: persona.background,
       },
       extraNote,
+      cloudflareAccountId: keys.cloudflareAccountId,
+      cloudflareToken: keys.cloudflareToken,
     }),
   });
 

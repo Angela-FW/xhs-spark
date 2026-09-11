@@ -23,7 +23,7 @@ const brand = ZCOOL_XiaoWei({
 export const metadata: Metadata = {
   title: "重启笔记 · 求职内容规划与文案",
   description:
-    "37岁双非离职重启人设：一年内容日历、感悟整理、对话微调、小红书文案与免费封面生图。",
+    "37岁双非离职重启人设：一年内容日历、感悟整理、小红书文案与免费封面生图。",
   applicationName: "重启笔记",
   manifest: "/manifest.webmanifest",
   icons: {

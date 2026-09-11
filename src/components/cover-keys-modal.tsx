@@ -34,8 +34,7 @@ export function CoverKeysModal({ open, onClose, onConfigured }: Props) {
               配置文生图 Key
             </h3>
             <p className="mt-1 text-xs text-[var(--ink-soft)]">
-              文生图只能用你自己的 Key，填好并保存后即可生成封面。Key
-              保存在本机浏览器，不会上传到我们的账号。
+              每人使用自己的 Key，登录后跨设备同步到账号。不会占用别人的 Cloudflare 额度。
             </p>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={onClose}>

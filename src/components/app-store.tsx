@@ -31,7 +31,6 @@ import {
   upsertSavedPersona,
 } from "@/lib/store";
 import { applyPending, proposeFromFeedback, undoLastSnapshot } from "@/lib/calibrate";
-import { parseDialogue } from "@/lib/dialogue";
 import type { CreatorPersona } from "@/lib/persona";
 import { getPreset, type PresetId } from "@/lib/persona";
 
@@ -61,7 +60,6 @@ type StoreApi = {
   confirmPending: () => void;
   discardPending: () => void;
   undoCalibration: () => void;
-  sendDialogue: (text: string) => void;
   updatePersona: (persona: CreatorPersona) => void;
   applyPersonaAndRebuild: (persona: CreatorPersona) => void;
   applySystemPreset: (id: PresetId) => void;
@@ -219,33 +217,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((s) => undoLastSnapshot(s));
   }, []);
 
-  const sendDialogue = useCallback((text: string) => {
-    setState((s) => {
-      const userMsg = {
-        id: newId("msg"),
-        role: "user" as const,
-        text,
-        createdAt: new Date().toISOString(),
-      };
-      const future = s.posts
-        .filter((p) => p.status === "planned")
-        .sort((a, b) => a.week - b.week);
-      const parsed = parseDialogue(text, s.weights, future);
-      const assistant = {
-        id: newId("msg"),
-        role: "assistant" as const,
-        text: parsed.reply,
-        createdAt: new Date().toISOString(),
-        pendingId: parsed.ok ? parsed.pending.id : undefined,
-      };
-      return {
-        ...s,
-        chat: [...s.chat, userMsg, assistant],
-        pending: parsed.ok ? parsed.pending : s.pending,
-      };
-    });
-  }, []);
-
   const updatePersona = useCallback((persona: CreatorPersona) => {
     setState((s) => updatePersonaFields(s, persona));
   }, []);
@@ -351,7 +322,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       confirmPending,
       discardPending,
       undoCalibration,
-      sendDialogue,
       updatePersona,
       applyPersonaAndRebuild,
       applySystemPreset,
@@ -379,7 +349,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       confirmPending,
       discardPending,
       undoCalibration,
-      sendDialogue,
       updatePersona,
       applyPersonaAndRebuild,
       applySystemPreset,

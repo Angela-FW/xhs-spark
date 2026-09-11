@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { saveCloudCoverKeys } from "@/lib/cloud-cover-keys";
+import type { CoverProvider } from "@/lib/cover-image";
 import {
   COVER_KEY_LINKS,
   hasUsableCoverKeys,
@@ -9,10 +15,6 @@ import {
   saveCoverKeys,
   type StoredCoverKeys,
 } from "@/lib/cover-keys";
-import type { CoverProvider } from "@/lib/cover-image";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 type Props = {
   /** Compact copy for register modal */
@@ -21,8 +23,10 @@ type Props = {
 };
 
 export function CoverKeysForm({ compact, onSaved }: Props) {
+  const { user } = useAuth();
   const [keys, setKeys] = useState<StoredCoverKeys>(() => loadCoverKeys());
   const [savedHint, setSavedHint] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const sync = () => setKeys(loadCoverKeys());
@@ -37,10 +41,38 @@ export function CoverKeysForm({ compact, onSaved }: Props) {
     setSavedHint(null);
   }
 
-  function handleSave() {
-    saveCoverKeys(keys);
-    setSavedHint(hasUsableCoverKeys(keys) ? "已保存，可稍后改" : "已保存（尚未填完整，可稍后再配）");
-    onSaved?.(keys);
+  async function handleSave() {
+    setSaving(true);
+    setSavedHint(null);
+    const next: StoredCoverKeys = {
+      ...keys,
+      configuredAt: new Date().toISOString(),
+    };
+    try {
+      saveCoverKeys(next);
+      if (user) {
+        await saveCloudCoverKeys(user.id, next);
+        setSavedHint(
+          hasUsableCoverKeys(next)
+            ? "已保存并同步到你的账号"
+            : "已同步（尚未填完整，可稍后再配）",
+        );
+      } else {
+        setSavedHint(
+          hasUsableCoverKeys(next)
+            ? "已保存到本机；登录后会同步到账号"
+            : "已保存（尚未填完整，可稍后再配）",
+        );
+      }
+      onSaved?.(next);
+    } catch (err) {
+      setSavedHint(
+        err instanceof Error ? `本机已存，云端同步失败：${err.message}` : "同步失败",
+      );
+      onSaved?.(next);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -50,8 +82,8 @@ export function CoverKeysForm({ compact, onSaved }: Props) {
           <p className="text-sm font-medium text-[var(--ink)]">生图模型 Key</p>
           <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
             {compact
-              ? "可先跳过，注册后随时再配；不影响登录。"
-              : "存在本机浏览器，可随时修改。不配也能先写文案。"}
+              ? "每人自备 Key。登录后会同步到你的账号，不占用别人额度。"
+              : "每人使用自己的 Key。登录后跨设备同步；不配则无法生图。"}
           </p>
         </div>
         <a
@@ -137,8 +169,14 @@ export function CoverKeysForm({ compact, onSaved }: Props) {
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={handleSave}>
-          保存 Key
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void handleSave()}
+          disabled={saving}
+        >
+          {saving ? "保存中…" : "保存 Key"}
         </Button>
         {savedHint ? (
           <span className="text-xs text-[var(--coral)]">{savedHint}</span>

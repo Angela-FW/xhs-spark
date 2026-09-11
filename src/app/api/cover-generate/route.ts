@@ -253,11 +253,11 @@ export async function POST(req: NextRequest) {
       const accountId = body.cloudflareAccountId?.trim() || "";
       const token =
         body.cloudflareToken?.trim() ||
-        req.headers.get("x-cloudflare-token") ||
+        req.headers.get("x-cloudflare-token")?.trim() ||
         "";
       if (!accountId || !token) {
         return jsonError(
-          "请先配置你自己的 Cloudflare Account ID + API Token 后再文生图。",
+          "未配置生图 Key：请在生成页填写你自己的 Cloudflare Account ID 与 API Token（登录后会同步到账号）。",
           401,
         );
       }
@@ -269,10 +269,12 @@ export async function POST(req: NextRequest) {
 
     if (provider === "siliconflow") {
       const apiKey =
-        body.apiKey?.trim() || req.headers.get("x-siliconflow-key") || "";
+        body.apiKey?.trim() ||
+        req.headers.get("x-siliconflow-key")?.trim() ||
+        "";
       if (!apiKey) {
         return jsonError(
-          "请先配置你自己的硅基流动 API Key 后再文生图。",
+          "未配置硅基流动 Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
           401,
         );
       }
@@ -281,9 +283,14 @@ export async function POST(req: NextRequest) {
 
     // pollinations
     const apiKey =
-      body.apiKey?.trim() || req.headers.get("x-pollinations-key") || "";
+      body.apiKey?.trim() ||
+      req.headers.get("x-pollinations-key")?.trim() ||
+      "";
     if (!apiKey) {
-      return jsonError("请先配置你自己的 Pollinations API Key 后再文生图。", 401);
+      return jsonError(
+        "未配置 Pollinations Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
+        401,
+      );
     }
     return generatePollinations({ prompt, seed, apiKey, size, image });
   } catch (err) {
