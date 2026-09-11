@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildFluxPrompt } from "@/lib/cover-prompt";
+import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,9 @@ function jsonError(message: string, status: number, detail?: string) {
  */
 export async function POST(req: NextRequest) {
   try {
+    const gate = await requireUserForAi(req);
+    if (!gate.ok) return gate.response;
+
     const incoming = await req.formData();
     const image = incoming.get("image");
     const prompt = String(incoming.get("prompt") ?? "");
@@ -29,13 +33,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (provider === "pollinations") {
-      const key =
-        req.headers.get("x-pollinations-key") ||
-        process.env.POLLINATIONS_API_KEY ||
-        "";
+      const key = req.headers.get("x-pollinations-key") || "";
       if (!key) {
         return jsonError(
-          "缺少 Pollinations API Key。图生图请改用已配置的 Cloudflare，或设置 POLLINATIONS_API_KEY。",
+          "请先配置你自己的 Pollinations API Key 后再图生图。",
           401,
         );
       }
@@ -71,15 +72,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Cloudflare img2img (free daily Neurons)
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || "";
-    const token =
-      req.headers.get("x-cloudflare-token") ||
-      process.env.CLOUDFLARE_API_TOKEN ||
-      "";
+    // Cloudflare img2img — 仅使用用户传入的凭证
+    const accountId = String(incoming.get("cloudflareAccountId") ?? "").trim();
+    const token = req.headers.get("x-cloudflare-token") || "";
     if (!accountId || !token) {
       return jsonError(
-        "缺少 Cloudflare 凭证。请在本机 .env.local 配置 CLOUDFLARE_ACCOUNT_ID 与 CLOUDFLARE_API_TOKEN。",
+        "请先配置你自己的 Cloudflare Account ID 与 API Token 后再图生图。",
         401,
       );
     }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildFluxPrompt } from "@/lib/cover-prompt";
+import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
@@ -235,33 +236,28 @@ async function generatePollinations(opts: {
  */
 export async function POST(req: NextRequest) {
   try {
+    const gate = await requireUserForAi(req);
+    if (!gate.ok) return gate.response;
+
     const body = (await req.json()) as Body;
     const prompt = String(body.prompt ?? "").trim();
     if (!prompt) return jsonError("需要 prompt", 400);
 
-    const provider: CoverProvider =
-      body.provider ||
-      (process.env.CLOUDFLARE_API_TOKEN ? "cloudflare" : undefined) ||
-      (process.env.SILICONFLOW_API_KEY ? "siliconflow" : undefined) ||
-      "cloudflare";
+    const provider: CoverProvider = body.provider || "cloudflare";
 
     const seed = Number(body.seed ?? Date.now() % 100000) || 1;
     const size = String(body.size || "1080x1440");
     const image = body.image?.trim() || undefined;
 
     if (provider === "cloudflare") {
-      const accountId =
-        body.cloudflareAccountId?.trim() ||
-        process.env.CLOUDFLARE_ACCOUNT_ID ||
-        "";
+      const accountId = body.cloudflareAccountId?.trim() || "";
       const token =
         body.cloudflareToken?.trim() ||
         req.headers.get("x-cloudflare-token") ||
-        process.env.CLOUDFLARE_API_TOKEN ||
         "";
       if (!accountId || !token) {
         return jsonError(
-          "缺少 Cloudflare 凭证。请填写 Account ID + API Token（免费：每天约 1 万 Neurons，约 170 张图）。申请：https://dash.cloudflare.com → Workers AI",
+          "请先配置你自己的 Cloudflare Account ID + API Token 后再文生图。",
           401,
         );
       }
@@ -273,13 +269,10 @@ export async function POST(req: NextRequest) {
 
     if (provider === "siliconflow") {
       const apiKey =
-        body.apiKey?.trim() ||
-        req.headers.get("x-siliconflow-key") ||
-        process.env.SILICONFLOW_API_KEY ||
-        "";
+        body.apiKey?.trim() || req.headers.get("x-siliconflow-key") || "";
       if (!apiKey) {
         return jsonError(
-          "缺少硅基流动 API Key。注册并实名后可免费调用 FLUX.1-schnell（有每日上限）：https://cloud.siliconflow.cn",
+          "请先配置你自己的硅基流动 API Key 后再文生图。",
           401,
         );
       }
@@ -288,15 +281,9 @@ export async function POST(req: NextRequest) {
 
     // pollinations
     const apiKey =
-      body.apiKey?.trim() ||
-      req.headers.get("x-pollinations-key") ||
-      process.env.POLLINATIONS_API_KEY ||
-      "";
+      body.apiKey?.trim() || req.headers.get("x-pollinations-key") || "";
     if (!apiKey) {
-      return jsonError(
-        "缺少 Pollinations API Key。建议改用 Cloudflare（每日免费额度）或硅基流动。",
-        401,
-      );
+      return jsonError("请先配置你自己的 Pollinations API Key 后再文生图。", 401);
     }
     return generatePollinations({ prompt, seed, apiKey, size, image });
   } catch (err) {

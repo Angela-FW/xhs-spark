@@ -1,5 +1,6 @@
 import type { CalendarPost } from "./year-calendar";
 import { pillarLabel } from "./persona";
+import { withAuthHeaders } from "@/lib/auth-fetch";
 
 /** Xiaohongshu-ish cover ratio (best-effort; Cloudflare flux is near-square) */
 const WIDTH = 1080;
@@ -111,15 +112,20 @@ export async function generateCoverImage(
   const prompt = resolvePrompt(post, options?.prompt, forImg2Img);
   const seed = options?.seed ?? hashSeed(post.id + prompt.slice(0, 24));
 
-  const headers: HeadersInit = { "Content-Type": "application/json" };
+  const headers: HeadersInit = await withAuthHeaders({
+    "Content-Type": "application/json",
+  });
   if (provider === "cloudflare" && creds?.cloudflareToken) {
-    headers["x-cloudflare-token"] = creds.cloudflareToken;
+    (headers as Record<string, string>)["x-cloudflare-token"] =
+      creds.cloudflareToken;
   }
   if (provider === "siliconflow" && creds?.siliconflowKey) {
-    headers["x-siliconflow-key"] = creds.siliconflowKey;
+    (headers as Record<string, string>)["x-siliconflow-key"] =
+      creds.siliconflowKey;
   }
   if (provider === "pollinations" && creds?.pollinationsKey) {
-    headers["x-pollinations-key"] = creds.pollinationsKey;
+    (headers as Record<string, string>)["x-pollinations-key"] =
+      creds.pollinationsKey;
   }
 
   const res = await fetch("/api/cover-generate", {
@@ -171,13 +177,21 @@ export async function editCoverFromFile(
   form.append("provider", provider);
   form.append("strength", "0.65");
   if (options?.seed != null) form.append("seed", String(options.seed));
+  if (options?.credentials?.cloudflareAccountId) {
+    form.append(
+      "cloudflareAccountId",
+      options.credentials.cloudflareAccountId,
+    );
+  }
 
-  const headers: HeadersInit = {};
+  const headers: HeadersInit = await withAuthHeaders();
   if (provider === "pollinations" && options?.credentials?.pollinationsKey) {
-    headers["x-pollinations-key"] = options.credentials.pollinationsKey;
+    (headers as Record<string, string>)["x-pollinations-key"] =
+      options.credentials.pollinationsKey;
   }
   if (provider === "cloudflare" && options?.credentials?.cloudflareToken) {
-    headers["x-cloudflare-token"] = options.credentials.cloudflareToken;
+    (headers as Record<string, string>)["x-cloudflare-token"] =
+      options.credentials.cloudflareToken;
   }
 
   const res = await fetch("/api/cover-edit", {

@@ -3,6 +3,7 @@ import {
   generateNoteFromPost,
   type GeneratedNote,
 } from "@/lib/note-gen";
+import { withAuthHeaders } from "@/lib/auth-fetch";
 import type { CreatorPersona } from "@/lib/persona";
 import type { CalendarPost } from "@/lib/year-calendar";
 
@@ -38,7 +39,7 @@ async function fetchNoteBodyOnce(
 ): Promise<string> {
   const res = await fetch("/api/note-generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await withAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       title,
       angle: post.angle,

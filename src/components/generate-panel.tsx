@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, ImageIcon, RefreshCw, Sparkles } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
+import { useAuth } from "@/components/auth-provider";
+import { CoverKeysModal } from "@/components/cover-keys-modal";
 import {
   generateNoteFromPost,
   generateTitleCandidates,
@@ -14,6 +16,11 @@ import {
   buildCoverPrompt,
   generateCoverImage,
 } from "@/lib/cover-image";
+import {
+  hasUsableCoverKeys,
+  loadCoverKeys,
+  toCoverCredentials,
+} from "@/lib/cover-keys";
 import { composeTypographicCover, parseCoverBrief } from "@/lib/cover-compose";
 import { pillarLabel, phaseLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
@@ -42,6 +49,7 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
 
 export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const { state, setPostStatus, saveDraft } = useAppStore();
+  const { requireAuth } = useAuth();
   const post = state.posts.find((p) => p.id === state.selectedPostId) ?? null;
   const [draftExtra, setDraftExtra] = useState("");
   const [note, setNote] = useState<GeneratedNote | null>(null);
@@ -56,8 +64,18 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const [genError, setGenError] = useState<string | null>(null);
   const [bodyHint, setBodyHint] = useState<string | null>(null);
   const [justGenerated, setJustGenerated] = useState(false);
+  const [keysModalOpen, setKeysModalOpen] = useState(false);
+  const [pendingCoverSeed, setPendingCoverSeed] = useState<number | null>(null);
+  const [keysReady, setKeysReady] = useState(() => hasUsableCoverKeys());
   const bodyRef = useRef<HTMLDivElement>(null);
   const bodyReqId = useRef(0);
+
+  useEffect(() => {
+    const sync = () => setKeysReady(hasUsableCoverKeys());
+    sync();
+    window.addEventListener("restart-cover-keys", sync);
+    return () => window.removeEventListener("restart-cover-keys", sync);
+  }, []);
 
   useEffect(() => {
     setTitleSeed(0);
@@ -126,6 +144,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
 
   async function applyBodyForTitle(title: string, nextBodySeed: number) {
     if (!post) return;
+    if (!(await requireAuth())) return;
     const reqId = ++bodyReqId.current;
     setBodyBusy(true);
     setBodyHint("正在生成正文…");
@@ -217,6 +236,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
 
   async function generateCover(nextSeed?: number) {
     if (!post) return;
+    if (!(await requireAuth())) return;
     setGenError(null);
 
     const promptToUse = coverPrompt.trim() || autoCoverPrompt;
@@ -225,26 +245,43 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       return;
     }
 
-    const useSeed = nextSeed ?? (seed || Date.now() % 100000);
-    setSeed(useSeed);
-    setBusy(true);
-
-    try {
-      const brief = parseCoverBrief(promptToUse);
-      // Structured 内容/风格/颜色 → local typography (Chinese text drawn accurately)
-      if (brief.wantsText && brief.contentItems.length > 0) {
+    const brief = parseCoverBrief(promptToUse);
+    // Structured 内容/风格/颜色 → local typography（不走文生图，无需 Key）
+    if (brief.wantsText && brief.contentItems.length > 0) {
+      const useSeed = nextSeed ?? (seed || Date.now() % 100000);
+      setSeed(useSeed);
+      setBusy(true);
+      try {
         const url = await composeTypographicCover(brief, {
           title: selectedTitle || post.titleHint,
         });
         if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
         setResultUrl(url);
-        return;
+      } catch (err) {
+        setGenError(err instanceof Error ? err.message : "封面合成失败");
+      } finally {
+        setBusy(false);
       }
+      return;
+    }
 
+    // AI 文生图：必须用户自备 Key
+    const creds = toCoverCredentials(loadCoverKeys());
+    if (!hasUsableCoverKeys(creds)) {
+      setPendingCoverSeed(nextSeed ?? null);
+      setKeysModalOpen(true);
+      return;
+    }
+
+    const useSeed = nextSeed ?? (seed || Date.now() % 100000);
+    setSeed(useSeed);
+    setBusy(true);
+
+    try {
       const url = await generateCoverImage(post, {
         seed: useSeed,
         prompt: promptToUse,
-        credentials: { provider: "cloudflare" },
+        credentials: creds,
       });
       if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
       setResultUrl(url);
@@ -274,6 +311,19 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
 
   return (
     <div className="space-y-4">
+      <CoverKeysModal
+        open={keysModalOpen}
+        onClose={() => {
+          setKeysModalOpen(false);
+          setPendingCoverSeed(null);
+        }}
+        onConfigured={() => {
+          setKeysReady(true);
+          const seedToUse = pendingCoverSeed;
+          setPendingCoverSeed(null);
+          void generateCover(seedToUse ?? undefined);
+        }}
+      />
       {onClose ? (
         <div className="studio-shell sticky top-2 z-20 -mt-2 flex items-center justify-between gap-3 rounded-2xl p-2">
           <Button type="button" size="sm" variant="outline" onClick={persistAndClose}>
@@ -466,7 +516,16 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
         </div>
 
         <p className="mb-4 text-xs text-[var(--ink-soft)]">
-          使用本机已配置的 Cloudflare 每日免费额度。填写提示词后点「生成封面」即可。
+          {keysReady
+            ? "已配置你的文生图 Key（存在本机）。未填 Key 时点「生成封面」会弹出配置。"
+            : "文生图需使用你自己的 Key；未配置时点「生成封面」会弹出配置页。"}{" "}
+          <button
+            type="button"
+            className="text-[var(--coral-deep)] underline-offset-2 hover:underline"
+            onClick={() => setKeysModalOpen(true)}
+          >
+            {keysReady ? "修改 Key" : "去配置 Key"}
+          </button>
         </p>
 
         <div className="space-y-2 rounded-xl border border-[var(--coral)]/25 bg-[var(--coral)]/5 p-4">

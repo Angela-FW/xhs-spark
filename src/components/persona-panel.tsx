@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/app-store";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   MAX_SAVED_PERSONAS,
   PERSONA_PRESETS,
@@ -19,6 +20,16 @@ import { Textarea } from "@/components/ui/textarea";
 type Fields = ReturnType<typeof editableFieldsFromPersona>;
 
 const SYSTEM_PRESETS = PERSONA_PRESETS.filter((p) => p.id !== "custom");
+
+const REBUILD_HINT =
+  "会清空其他周的「待写」选题，只保留已起草/已发布，并新生成未来一周。确定继续？";
+
+type PendingAction =
+  | { kind: "system"; id: PresetId }
+  | { kind: "saved"; id: string }
+  | { kind: "blank" }
+  | { kind: "rebuild" }
+  | { kind: "delete"; id: string; label: string };
 
 export function PersonaPanel() {
   const {
@@ -39,6 +50,7 @@ export function PersonaPanel() {
     editableFieldsFromPersona(state.persona),
   );
   const [savedHint, setSavedHint] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
 
   useEffect(() => {
     setDraft(clonePersona(state.persona));
@@ -58,38 +70,71 @@ export function PersonaPanel() {
   const systemActive =
     !activeSaved && SYSTEM_PRESETS.some((p) => p.id === draft.presetId);
 
-  function confirmRebuild(detail: string): boolean {
-    return confirm(
-      `${detail}\n\n会清空其他周的「待写」选题，只保留已起草/已发布，并新生成未来一周。确定继续？`,
-    );
-  }
-
-  function onPickSystem(id: PresetId) {
-    if (systemActive && draft.presetId === id) return;
-    if (!confirmRebuild("切换系统预设")) return;
-    applySystemPreset(id);
-    setSavedHint("已切换系统预设：页头、阶段标签已同步，并重算了未来最近一周的待写选题");
-  }
-
-  function onPickSaved(id: string) {
-    if (activeSaved === id) return;
-    if (!confirmRebuild("切换自定义人设")) return;
-    pickSavedPersona(id);
-    setSavedHint("已切换自定义人设，并重算了未来最近一周的待写选题");
-  }
-
-  function onStartBlank() {
-    if (!activeSaved && draft.presetId === "custom") return;
-    if (!confirmRebuild("新建空白自定义人设")) return;
-    startBlankCustom();
-    setSavedHint("已打开空白自定义人设，填完后点「保存」加入列表");
-  }
-
   function buildCustomPersona(): CreatorPersona {
     return {
       ...buildFromFields(),
       presetId: "custom",
     };
+  }
+
+  function runSaveAndRebuild() {
+    if (state.activeSavedPersonaId || draft.presetId === "custom") {
+      const next = buildCustomPersona();
+      setDraft(next);
+      const id = savePersonaToListAndRebuild(next, next.name);
+      if (id) {
+        setSavedHint(`已保存「${next.name}」，并重算了未来最近一周的待写选题`);
+      }
+      return;
+    }
+    const next = buildFromFields();
+    setDraft(next);
+    applyPersonaAndRebuild(next);
+    setSavedHint("已保存，并重算了未来最近一周的待写选题");
+  }
+
+  function onConfirmPending() {
+    if (!pending) return;
+    const action = pending;
+    setPending(null);
+    if (action.kind === "system") {
+      applySystemPreset(action.id);
+      setSavedHint(
+        "已切换系统预设：页头、阶段标签已同步，并重算了未来最近一周的待写选题",
+      );
+      return;
+    }
+    if (action.kind === "saved") {
+      pickSavedPersona(action.id);
+      setSavedHint("已切换自定义人设，并重算了未来最近一周的待写选题");
+      return;
+    }
+    if (action.kind === "blank") {
+      startBlankCustom();
+      setSavedHint("已打开空白自定义人设，填完后点「保存」加入列表");
+      return;
+    }
+    if (action.kind === "rebuild") {
+      runSaveAndRebuild();
+      return;
+    }
+    removeSavedPersona(action.id);
+    setSavedHint(`已删除「${action.label}」`);
+  }
+
+  function onPickSystem(id: PresetId) {
+    if (systemActive && draft.presetId === id) return;
+    setPending({ kind: "system", id });
+  }
+
+  function onPickSaved(id: string) {
+    if (activeSaved === id) return;
+    setPending({ kind: "saved", id });
+  }
+
+  function onStartBlank() {
+    if (!activeSaved && draft.presetId === "custom") return;
+    setPending({ kind: "blank" });
   }
 
   /** 已有人设 → 更新；新建自定义 → 新增；系统预设 → 只更新当前使用 */
@@ -115,30 +160,48 @@ export function PersonaPanel() {
   }
 
   function onSaveAndRebuild() {
-    if (!confirmRebuild("保存并重算选题")) return;
-    if (state.activeSavedPersonaId || draft.presetId === "custom") {
-      const next = buildCustomPersona();
-      setDraft(next);
-      const id = savePersonaToListAndRebuild(next, next.name);
-      if (id) {
-        setSavedHint(`已保存「${next.name}」，并重算了未来最近一周的待写选题`);
-      }
-      return;
-    }
-    const next = buildFromFields();
-    setDraft(next);
-    applyPersonaAndRebuild(next);
-    setSavedHint("已保存，并重算了未来最近一周的待写选题");
+    setPending({ kind: "rebuild" });
   }
 
   function onDeleteSaved(id: string, label: string) {
-    if (!confirm(`删除自定义人设「${label}」？此操作不可恢复。`)) return;
-    removeSavedPersona(id);
-    setSavedHint(`已删除「${label}」`);
+    setPending({ kind: "delete", id, label });
   }
+
+  const dialog =
+    pending?.kind === "delete"
+      ? {
+          title: "删除自定义人设",
+          message: `删除自定义人设「${pending.label}」？此操作不可恢复。`,
+          confirmLabel: "删除",
+          danger: true,
+        }
+      : pending
+        ? {
+            title:
+              pending.kind === "system"
+                ? "切换系统预设"
+                : pending.kind === "saved"
+                  ? "切换自定义人设"
+                  : pending.kind === "blank"
+                    ? "新建空白自定义人设"
+                    : "保存并重算选题",
+            message: REBUILD_HINT,
+            confirmLabel: "确定继续",
+            danger: false,
+          }
+        : null;
 
   return (
     <div className="space-y-5">
+      <ConfirmDialog
+        open={Boolean(dialog)}
+        title={dialog?.title ?? ""}
+        message={dialog?.message ?? ""}
+        confirmLabel={dialog?.confirmLabel}
+        danger={dialog?.danger}
+        onConfirm={onConfirmPending}
+        onCancel={() => setPending(null)}
+      />
       <div className="studio-shell rounded-2xl p-5">
         <h3 className="font-display text-lg text-[var(--ink)]">创作者人设</h3>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">

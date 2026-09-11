@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,9 @@ function cleanMaterials(list: string[]): string[] {
 }
 
 export async function POST(req: Request) {
+  const gate = await requireUserForAi(req);
+  if (!gate.ok) return gate.response;
+
   const id = accountId();
   const token = apiToken();
   if (!id || !token) {

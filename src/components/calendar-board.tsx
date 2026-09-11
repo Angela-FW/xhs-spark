@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/components/app-store";
+import { useAuth } from "@/components/auth-provider";
 import { phaseLabel, pillarLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ export function CalendarBoard({
   onOpenGenerate: (postId: string) => void;
 }) {
   const { state, setSelectedPostId, generateMoreWeek } = useAppStore();
+  const { requireAuth } = useAuth();
   const [phase, setPhase] = useState<number>(0);
   const [weekJump, setWeekJump] = useState(1);
 
@@ -179,7 +181,10 @@ export function CalendarBoard({
                                 className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onOpenGenerate(post.id);
+                                  void (async () => {
+                                    if (!(await requireAuth())) return;
+                                    onOpenGenerate(post.id);
+                                  })();
                                 }}
                               >
                                 生成
