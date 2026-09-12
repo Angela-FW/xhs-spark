@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/app-store";
+import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   LAUNCH_PRESETS,
@@ -28,7 +29,8 @@ type PendingAction =
   | { kind: "saved"; id: string }
   | { kind: "blank" }
   | { kind: "rebuild" }
-  | { kind: "delete"; id: string; label: string };
+  | { kind: "delete"; id: string; label: string }
+  | { kind: "reset" };
 
 export function PersonaPanel() {
   const {
@@ -41,7 +43,9 @@ export function PersonaPanel() {
     removeSavedPersona,
     pickSavedPersona,
     startBlankCustom,
+    resetAll,
   } = useAppStore();
+  const { user } = useAuth();
   const [step, setStep] = useState<Step>("pick");
   const [draft, setDraft] = useState<CreatorPersona>(() =>
     clonePersona(state.persona),
@@ -117,6 +121,12 @@ export function PersonaPanel() {
       runSaveAndRebuild();
       return;
     }
+    if (action.kind === "reset") {
+      resetAll();
+      setStep("pick");
+      setSavedHint(null);
+      return;
+    }
     removeSavedPersona(action.id);
     setSavedHint(`已删除「${action.label}」`);
     setStep("pick");
@@ -169,6 +179,14 @@ export function PersonaPanel() {
           confirmLabel: "删除",
           danger: true,
         }
+      : pending?.kind === "reset"
+        ? {
+            title: "重新起号",
+            message:
+              "将清空当前账号在本机与云端的规划，回到选人设引导。已保存的人设笔记都会删除。",
+            confirmLabel: "清空并重新起号",
+            danger: true,
+          }
       : pending
         ? {
             title:
@@ -208,18 +226,31 @@ export function PersonaPanel() {
           onCancel={() => setPending(null)}
         />
 
+        <button
+          type="button"
+          onClick={onStartBlank}
+          className="studio-shell w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
+        >
+          <p className="font-medium text-[var(--ink)]">+ 自定义人设</p>
+          <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+            从空白开始填写，适合你自己的细分方向
+          </p>
+        </button>
+
         <div>
           <h3 className="font-display text-lg text-[var(--ink)]">选一个人设</h3>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
-            先选方向或已有人设，下一步再填写具体配置。最多{" "}
-            {MAX_SAVED_PERSONAS} 个。
+            {user
+              ? "先选方向或已有人设，下一步再填写具体配置。登录后会同步到账号。"
+              : "未登录时人设保存在本机浏览器。换手机或清缓存会丢失；登录后才会同步到账号。"}
+            最多 {MAX_SAVED_PERSONAS} 个。
           </p>
         </div>
 
         {state.workspaces.length > 0 ? (
           <div>
             <p className="mb-2 text-xs font-medium text-[var(--ink-soft)]">
-              我的人设
+              {user ? "账号里的人设" : "本机已有人设（未登录，未进账号）"}
             </p>
             <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {state.workspaces.map((s) => {
@@ -281,20 +312,16 @@ export function PersonaPanel() {
                 </button>
               </li>
             ))}
-            <li>
-              <button
-                type="button"
-                onClick={onStartBlank}
-                className="studio-shell h-full w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
-              >
-                <p className="font-medium text-[var(--ink)]">+ 自定义人设</p>
-                <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
-                  从空白开始填写，适合你自己的细分方向
-                </p>
-              </button>
-            </li>
           </ul>
         </div>
+
+        <button
+          type="button"
+          className="text-sm text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline"
+          onClick={() => setPending({ kind: "reset" })}
+        >
+          清空规划，重新起号
+        </button>
       </div>
     );
   }

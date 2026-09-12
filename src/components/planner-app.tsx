@@ -28,19 +28,32 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-function CloudSyncBridge() {
-  const { user } = useAuth();
+function CloudSyncBridge({
+  onGateReady,
+}: {
+  onGateReady: (ready: boolean) => void;
+}) {
+  const { user, ready: authReady } = useAuth();
   const { state, ready, importJson, exportJson } = useAppStore();
   const [cloudReady, setCloudReady] = useState(false);
   const pulling = useRef(false);
 
   useEffect(() => {
-    if (!ready || !user) {
-      setCloudReady(false);
+    if (!authReady || !ready) {
+      onGateReady(false);
       return;
     }
+    if (!user) {
+      // Browse locally — no cloud pull to wait for.
+      setCloudReady(false);
+      onGateReady(true);
+      return;
+    }
+
     let cancelled = false;
     pulling.current = true;
+    onGateReady(false);
+    setCloudReady(false);
     (async () => {
       try {
         const remote = await fetchCloudState(user.id);
@@ -56,6 +69,7 @@ function CloudSyncBridge() {
         if (!cancelled) {
           pulling.current = false;
           setCloudReady(true);
+          onGateReady(true);
         }
       }
     })();
@@ -64,7 +78,7 @@ function CloudSyncBridge() {
     };
     // Only re-pull when the signed-in user changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, user?.id]);
+  }, [ready, authReady, user?.id]);
 
   useEffect(() => {
     if (!ready || !user || !cloudReady || pulling.current) return;
@@ -114,15 +128,18 @@ function PlannerInner() {
   const [tab, setTab] = useState<TabId>("calendar");
   const [generateOpen, setGenerateOpen] = useState(false);
   const [personaOpen, setPersonaOpen] = useState(false);
-  const { state, setSelectedPostId, startLaunchPreset } = useAppStore();
-  const { authEnabled, user, openAuth, signOut } = useAuth();
+  const { state, setSelectedPostId, startLaunchPreset, ready: storeReady } =
+    useAppStore();
+  const { authEnabled, user, openAuth, signOut, ready: authReady } = useAuth();
   const [mounted, setMounted] = useState(false);
+  const [cloudGateReady, setCloudGateReady] = useState(false);
   const [launching, setLaunching] = useState<{
     id: (typeof LAUNCH_PRESETS)[number]["id"];
     label: string;
   } | null>(null);
   const persona = state.persona;
-  const needsOnboarding = !state.activeWorkspaceId;
+  const bootReady = storeReady && authReady && cloudGateReady;
+  const needsOnboarding = bootReady && !state.activeWorkspaceId;
   const activeLabel =
     state.workspaces.find((w) => w.id === state.activeWorkspaceId)?.label ||
     persona.name;
@@ -175,7 +192,7 @@ function PlannerInner() {
 
   return (
     <div className="relative">
-      <CloudSyncBridge />
+      <CloudSyncBridge onGateReady={setCloudGateReady} />
       <CoverKeysSyncBridge />
       <header className="hero-panel relative overflow-hidden px-[max(1.25rem,4vw)] pb-4 pt-6 sm:pb-5 sm:pt-8">
         <div className="hero-glow" aria-hidden />
@@ -185,27 +202,15 @@ function PlannerInner() {
             mounted ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
           }`}
         >
-          <div className="flex items-start justify-between gap-3">
-            <p className="brand-mark text-4xl tracking-wide sm:text-5xl">
-              小红书图文起号
-            </p>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              {!needsOnboarding && !launching ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={openPersona}
-                >
-                  人设
-                </Button>
-              ) : null}
-              {authEnabled ? (
-                user ? (
+          <div className="relative">
+            {authEnabled ? (
+              <div className="mb-3 flex justify-end sm:absolute sm:right-0 sm:top-0 sm:mb-0 sm:z-10">
+                {user ? (
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="shrink-0"
                     onClick={() => void signOut()}
                   >
                     退出 {user.email?.split("@")[0]}
@@ -215,25 +220,42 @@ function PlannerInner() {
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="shrink-0"
                     onClick={() => openAuth("login")}
                   >
                     登录
                   </Button>
-                )
-              ) : null}
-            </div>
+                )}
+              </div>
+            ) : null}
+            <p className="brand-mark whitespace-nowrap text-[clamp(1.75rem,8vw,3rem)] tracking-wide sm:pr-24">
+              小红书图文起号
+            </p>
           </div>
           <h1 className="font-display mt-2 text-xl text-[var(--ink)] sm:mt-3 sm:text-2xl">
             按爆款路径涨粉
           </h1>
+          {bootReady && !needsOnboarding && !launching ? (
+            <div className="mt-3">
+              <Button type="button" size="sm" variant="outline" onClick={openPersona}>
+                切换人设
+              </Button>
+            </div>
+          ) : null}
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--ink-soft)] sm:text-base">
-            {heroSupport}
+            {!bootReady
+              ? "加载中…"
+              : heroSupport}
           </p>
         </div>
       </header>
 
       <div className="mx-auto w-full max-w-7xl px-[max(1rem,4vw)]">
-        {launching ? (
+        {!bootReady ? (
+          <div className="studio-shell mb-16 rounded-2xl px-6 py-12 text-center text-sm text-[var(--ink-soft)]">
+            正在同步你的规划…
+          </div>
+        ) : launching ? (
           <div className="launch-bridge studio-shell mb-16 rounded-2xl px-6 py-12 text-center">
             <p className="font-display text-lg text-[var(--ink)]">
               好的，就从「{launching.label}」开始

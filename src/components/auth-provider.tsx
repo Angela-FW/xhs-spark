@@ -15,12 +15,36 @@ import { isAuthConfigured } from "@/lib/cloud-env";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { AuthModal } from "@/components/auth-modal";
 
+/** Free generate clicks without login; the next one requires sign-in. */
+export const FREE_GENERATE_LIMIT = 9;
+const FREE_GEN_STORAGE_KEY = "restart-free-gen-count-v1";
+
+function readFreeGenCount(): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const n = Number(localStorage.getItem(FREE_GEN_STORAGE_KEY) || "0");
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function bumpFreeGenCount(): number {
+  const next = readFreeGenCount() + 1;
+  try {
+    localStorage.setItem(FREE_GEN_STORAGE_KEY, String(next));
+  } catch {
+    /* ignore quota / private mode */
+  }
+  return next;
+}
+
 type AuthApi = {
   ready: boolean;
   authEnabled: boolean;
   user: User | null;
   session: Session | null;
-  /** Gate AI「生成」：未登录则弹登录/注册；随便逛不弹。 */
+  /** Gate AI「生成」：未登录可免费点满 FREE_GENERATE_LIMIT 次，第 N+1 次再弹登录. */
   requireAuth: () => Promise<boolean>;
   openAuth: (mode?: "login" | "register") => void;
   signOut: () => Promise<void>;
@@ -71,6 +95,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const requireAuth = useCallback((): Promise<boolean> => {
     if (!authEnabled) return Promise.resolve(true);
     if (session?.user) return Promise.resolve(true);
+    const used = readFreeGenCount();
+    if (used < FREE_GENERATE_LIMIT) {
+      bumpFreeGenCount();
+      return Promise.resolve(true);
+    }
     return new Promise((resolve) => {
       pendingRef.current = resolve;
       setModalMode("register");

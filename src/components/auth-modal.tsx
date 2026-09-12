@@ -87,10 +87,10 @@ export function AuthModal({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p id="auth-title" className="font-display text-lg text-[var(--ink)]">
-              {mode === "login" ? "登录后生成" : "注册后生成"}
+              {mode === "login" ? "登录后继续生成" : "注册后继续生成"}
             </p>
             <p className="mt-1 text-xs text-[var(--ink-soft)]">
-              随便浏览不用账号；点「生成」类功能时再登录或注册。
+              未登录可先免费生成 9 次；第 10 次起需要登录或注册，便于同步规划。
             </p>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={onClose}>

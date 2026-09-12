@@ -24,8 +24,8 @@ export async function getUserFromRequest(
 }
 
 /**
- * When auth is configured, require a valid user.
- * When not configured (local/dev), allow through.
+ * AI routes allow anonymous use; client asks for login after free quota.
+ * When a Bearer token is present, attach the user for future per-account limits.
  */
 export async function requireUserForAi(
   req: Request,
@@ -34,14 +34,5 @@ export async function requireUserForAi(
     return { ok: true, user: null };
   }
   const user = await getUserFromRequest(req);
-  if (!user) {
-    return {
-      ok: false,
-      response: Response.json(
-        { error: "请先登录后再使用生成功能" },
-        { status: 401 },
-      ),
-    };
-  }
   return { ok: true, user };
 }
