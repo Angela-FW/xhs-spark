@@ -16,9 +16,11 @@ import {
   type PendingCalibration,
   activateWorkspace,
   attachMaterial,
+  clearPlannerStorage,
   createInitialState,
   deleteSavedPersona,
   exportState,
+  hasPlannerStorage,
   importState,
   loadState,
   appendNextCalendarWeek,
@@ -103,6 +105,48 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setHydrated(true);
     }
   }, []);
+
+  // After Safari clears website data, a background tab can still hold old React
+  // state and write it back. Reconcile when the tab is shown again.
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const reconcileClearedStorage = () => {
+      try {
+        if (hasPlannerStorage()) return;
+        setState((s) =>
+          s.activeWorkspaceId || s.workspaces.length > 0
+            ? createInitialState()
+            : s,
+        );
+      } catch (err) {
+        console.error("reconcile storage failed", err);
+      }
+    };
+
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        try {
+          setState(loadState());
+        } catch (err) {
+          console.error("bfcache rehydrate failed", err);
+        }
+        return;
+      }
+      reconcileClearedStorage();
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") reconcileClearedStorage();
+    };
+
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [hydrated]);
 
   // Roll unpublished schedule when the local day changes (tab focus / midnight).
   useEffect(() => {
@@ -309,6 +353,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetAll = useCallback(() => {
+    clearPlannerStorage();
     setState(createInitialState());
   }, []);
 

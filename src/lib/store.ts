@@ -891,6 +891,27 @@ export function loadState(): AppState {
   }
 }
 
+/** True when any planner key still exists in localStorage. */
+export function hasPlannerStorage(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (localStorage.getItem(STORAGE_KEY)) return true;
+    return LEGACY_KEYS.some((key) => Boolean(localStorage.getItem(key)));
+  } catch {
+    return false;
+  }
+}
+
+export function clearPlannerStorage() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    for (const key of LEGACY_KEYS) localStorage.removeItem(key);
+  } catch {
+    /* private mode / blocked */
+  }
+}
+
 export function saveState(state: AppState) {
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(syncActiveWorkspace(state)));

@@ -68,16 +68,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    sb.auth.getSession().then(({ data }) => {
+    const failSafe = window.setTimeout(() => {
       if (cancelled) return;
-      setSession(data.session);
       setReady(true);
-    });
+    }, 2500);
+    sb.auth
+      .getSession()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setSession(data.session);
+        setReady(true);
+      })
+      .catch((err) => {
+        console.error("getSession failed", err);
+        if (!cancelled) setReady(true);
+      })
+      .finally(() => {
+        window.clearTimeout(failSafe);
+      });
     const { data: sub } = sb.auth.onAuthStateChange((_event, next) => {
       setSession(next);
     });
     return () => {
       cancelled = true;
+      window.clearTimeout(failSafe);
       sub.subscription.unsubscribe();
     };
   }, [authEnabled]);

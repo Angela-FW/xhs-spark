@@ -128,8 +128,14 @@ function PlannerInner() {
   const [tab, setTab] = useState<TabId>("calendar");
   const [generateOpen, setGenerateOpen] = useState(false);
   const [personaOpen, setPersonaOpen] = useState(false);
-  const { state, setSelectedPostId, startLaunchPreset, ready: storeReady } =
-    useAppStore();
+  const {
+    state,
+    setSelectedPostId,
+    startLaunchPreset,
+    pickSavedPersona,
+    resetAll,
+    ready: storeReady,
+  } = useAppStore();
   const { authEnabled, user, openAuth, signOut, ready: authReady } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [cloudGateReady, setCloudGateReady] = useState(false);
@@ -147,6 +153,14 @@ function PlannerInner() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  async function onSignOut() {
+    await signOut();
+    resetAll();
+    setPersonaOpen(false);
+    setGenerateOpen(false);
+    setTab("calendar");
+  }
 
   function openGenerate(postId: string) {
     setSelectedPostId(postId);
@@ -211,7 +225,7 @@ function PlannerInner() {
                     size="sm"
                     variant="outline"
                     className="shrink-0"
-                    onClick={() => void signOut()}
+                    onClick={() => void onSignOut()}
                   >
                     退出 {user.email?.split("@")[0]}
                   </Button>
@@ -236,9 +250,30 @@ function PlannerInner() {
             按爆款路径涨粉
           </h1>
           {bootReady && !needsOnboarding && !launching ? (
-            <div className="mt-3">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {state.workspaces.map((w) => {
+                const active = w.id === state.activeWorkspaceId;
+                return (
+                  <Button
+                    key={w.id}
+                    type="button"
+                    size="sm"
+                    variant={active ? "default" : "outline"}
+                    className={
+                      active
+                        ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+                        : undefined
+                    }
+                    onClick={() => {
+                      if (!active) pickSavedPersona(w.id);
+                    }}
+                  >
+                    {w.label}
+                  </Button>
+                );
+              })}
               <Button type="button" size="sm" variant="outline" onClick={openPersona}>
-                切换人设
+                选择人设
               </Button>
             </div>
           ) : null}

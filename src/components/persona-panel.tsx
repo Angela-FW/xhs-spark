@@ -27,6 +27,7 @@ const REBUILD_HINT =
 type PendingAction =
   | { kind: "system"; id: PresetId }
   | { kind: "saved"; id: string }
+  | { kind: "edit"; id: string }
   | { kind: "blank" }
   | { kind: "rebuild" }
   | { kind: "delete"; id: string; label: string }
@@ -104,10 +105,13 @@ export function PersonaPanel() {
     setPending(null);
     if (action.kind === "system") {
       applySystemPreset(action.id);
-      goEdit();
       return;
     }
     if (action.kind === "saved") {
+      pickSavedPersona(action.id);
+      return;
+    }
+    if (action.kind === "edit") {
       pickSavedPersona(action.id);
       goEdit();
       return;
@@ -135,7 +139,6 @@ export function PersonaPanel() {
   function onPickSystem(id: PresetId) {
     const existing = state.workspaces.find((w) => w.persona.presetId === id);
     if (existing && existing.id === state.activeWorkspaceId) {
-      goEdit();
       return;
     }
     if (existing) {
@@ -146,11 +149,16 @@ export function PersonaPanel() {
   }
 
   function onPickSaved(id: string) {
+    if (state.activeWorkspaceId === id) return;
+    setPending({ kind: "saved", id });
+  }
+
+  function onEditSaved(id: string) {
     if (state.activeWorkspaceId === id) {
       goEdit();
       return;
     }
-    setPending({ kind: "saved", id });
+    setPending({ kind: "edit", id });
   }
 
   function onStartBlank() {
@@ -194,15 +202,19 @@ export function PersonaPanel() {
                 ? "选用起号方向"
                 : pending.kind === "saved"
                   ? "切换人设"
-                  : pending.kind === "blank"
-                    ? "新建自定义人设"
-                    : "保存并重算选题",
+                  : pending.kind === "edit"
+                    ? "配置人设"
+                    : pending.kind === "blank"
+                      ? "新建自定义人设"
+                      : "保存并重算选题",
             message:
               pending.kind === "rebuild"
                 ? REBUILD_HINT
                 : pending.kind === "blank"
                   ? "将新建一套自定义人设，并进入填写页。"
-                  : "将打开该人设的独立笔记库；若还没有这个方向，会新建未来四周路线。其他人设内容不会丢。",
+                  : pending.kind === "edit"
+                    ? "将切换到该人设并打开配置页。其他人设内容不会丢。"
+                    : "将切换到该人设的独立笔记库；若还没有这个方向，会新建未来四周路线。其他人设内容不会丢。",
             confirmLabel: "继续",
             danger: false,
           }
@@ -241,8 +253,8 @@ export function PersonaPanel() {
           <h3 className="font-display text-lg text-[var(--ink)]">选一个人设</h3>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
             {user
-              ? "先选方向或已有人设，下一步再填写具体配置。登录后会同步到账号。"
-              : "未登录时人设保存在本机浏览器。换手机或清缓存会丢失；登录后才会同步到账号。"}
+              ? "点人设可切换；点「设置」再改配置。登录后会同步到账号。"
+              : "点人设可切换；点「设置」再改配置。未登录保存在本机，清缓存会丢。"}
             最多 {MAX_SAVED_PERSONAS} 个。
           </p>
         </div>
@@ -269,22 +281,31 @@ export function PersonaPanel() {
                       >
                         <p className="font-medium text-[var(--ink)]">{s.label}</p>
                         <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                          {active ? "当前使用 · 点击继续配置" : "点击切换并配置"}
+                          {active ? "当前使用" : "点击切换"}
                         </p>
                       </button>
-                      <button
-                        type="button"
-                        className="mt-3 self-start text-xs text-[var(--ink-soft)] hover:text-[var(--ink)]"
-                        onClick={() =>
-                          setPending({
-                            kind: "delete",
-                            id: s.id,
-                            label: s.label,
-                          })
-                        }
-                      >
-                        删除
-                      </button>
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-[var(--coral)] hover:text-[var(--coral-deep)]"
+                          onClick={() => onEditSaved(s.id)}
+                        >
+                          设置
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs text-[var(--ink-soft)] hover:text-[var(--ink)]"
+                          onClick={() =>
+                            setPending({
+                              kind: "delete",
+                              id: s.id,
+                              label: s.label,
+                            })
+                          }
+                        >
+                          删除
+                        </button>
+                      </div>
                     </div>
                   </li>
                 );
