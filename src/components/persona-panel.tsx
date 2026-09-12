@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 type Fields = ReturnType<typeof editableFieldsFromPersona>;
+type Step = "pick" | "edit";
 
 const REBUILD_HINT =
   "会清空其他周的「待写」选题，只保留已起草/已发布，并重新生成未来四周。确定继续？";
@@ -41,6 +42,7 @@ export function PersonaPanel() {
     pickSavedPersona,
     startBlankCustom,
   } = useAppStore();
+  const [step, setStep] = useState<Step>("pick");
   const [draft, setDraft] = useState<CreatorPersona>(() =>
     clonePersona(state.persona),
   );
@@ -64,19 +66,16 @@ export function PersonaPanel() {
     return applyEditableFields(base, fields);
   }
 
-  const activeSaved = state.activeWorkspaceId;
-  const systemActive = Boolean(
-    activeSaved &&
-      LAUNCH_PRESETS.some((p) => p.id === draft.presetId) &&
-      state.workspaces.find((w) => w.id === activeSaved)?.persona.presetId ===
-        draft.presetId,
-  );
-
   function buildCustomPersona(): CreatorPersona {
     return {
       ...buildFromFields(),
       presetId: "custom",
     };
+  }
+
+  function goEdit() {
+    setSavedHint(null);
+    setStep("edit");
   }
 
   function runSaveAndRebuild() {
@@ -101,19 +100,17 @@ export function PersonaPanel() {
     setPending(null);
     if (action.kind === "system") {
       applySystemPreset(action.id);
-      setSavedHint(
-        "已切换起号方向：页头、阶段标签已同步，笔记保存在对应人设下",
-      );
+      goEdit();
       return;
     }
     if (action.kind === "saved") {
       pickSavedPersona(action.id);
-      setSavedHint("已切换人设，笔记与日历已切换到该人设");
+      goEdit();
       return;
     }
     if (action.kind === "blank") {
       startBlankCustom();
-      setSavedHint("已新建自定义人设，填完后点「保存」");
+      goEdit();
       return;
     }
     if (action.kind === "rebuild") {
@@ -122,32 +119,40 @@ export function PersonaPanel() {
     }
     removeSavedPersona(action.id);
     setSavedHint(`已删除「${action.label}」`);
+    setStep("pick");
   }
 
   function onPickSystem(id: PresetId) {
-    if (systemActive && draft.presetId === id) return;
+    const existing = state.workspaces.find((w) => w.persona.presetId === id);
+    if (existing && existing.id === state.activeWorkspaceId) {
+      goEdit();
+      return;
+    }
+    if (existing) {
+      setPending({ kind: "saved", id: existing.id });
+      return;
+    }
     setPending({ kind: "system", id });
   }
 
   function onPickSaved(id: string) {
-    if (activeSaved === id) return;
+    if (state.activeWorkspaceId === id) {
+      goEdit();
+      return;
+    }
     setPending({ kind: "saved", id });
   }
 
   function onStartBlank() {
-    if (!activeSaved && draft.presetId === "custom") return;
     setPending({ kind: "blank" });
   }
 
-  /** 已有人设 → 更新；新建自定义 → 新增 */
   function onSave() {
     if (state.activeWorkspaceId || draft.presetId === "custom") {
       const next = buildCustomPersona();
       setDraft(next);
       const id = savePersonaToList(next, next.name);
-      if (id) {
-        setSavedHint(`已保存人设「${next.name}」`);
-      }
+      if (id) setSavedHint(`已保存人设「${next.name}」`);
       return;
     }
     const next = buildFromFields();
@@ -156,19 +161,11 @@ export function PersonaPanel() {
     setSavedHint("已保存当前人设修改");
   }
 
-  function onSaveAndRebuild() {
-    setPending({ kind: "rebuild" });
-  }
-
-  function onDeleteSaved(id: string, label: string) {
-    setPending({ kind: "delete", id, label });
-  }
-
   const dialog =
     pending?.kind === "delete"
       ? {
-          title: "删除自定义人设",
-          message: `删除自定义人设「${pending.label}」？此操作不可恢复。`,
+          title: "删除人设",
+          message: `删除人设「${pending.label}」？此操作不可恢复。`,
           confirmLabel: "删除",
           danger: true,
         }
@@ -176,20 +173,131 @@ export function PersonaPanel() {
         ? {
             title:
               pending.kind === "system"
-                ? "切换起号方向"
+                ? "选用起号方向"
                 : pending.kind === "saved"
                   ? "切换人设"
                   : pending.kind === "blank"
                     ? "新建自定义人设"
                     : "保存并重算选题",
             message:
-              pending.kind === "saved" || pending.kind === "system"
-                ? "将打开该人设的独立笔记库；若还没有这个方向，会新建未来四周路线。其他人设内容不会丢。"
-                : REBUILD_HINT,
-            confirmLabel: "确定继续",
+              pending.kind === "rebuild"
+                ? REBUILD_HINT
+                : pending.kind === "blank"
+                  ? "将新建一套自定义人设，并进入填写页。"
+                  : "将打开该人设的独立笔记库；若还没有这个方向，会新建未来四周路线。其他人设内容不会丢。",
+            confirmLabel: "继续",
             danger: false,
           }
         : null;
+
+  const currentLabel =
+    state.workspaces.find((w) => w.id === state.activeWorkspaceId)?.label ||
+    draft.name ||
+    "当前人设";
+
+  if (step === "pick") {
+    return (
+      <div className="space-y-5">
+        <ConfirmDialog
+          open={Boolean(dialog)}
+          title={dialog?.title ?? ""}
+          message={dialog?.message ?? ""}
+          confirmLabel={dialog?.confirmLabel}
+          danger={dialog?.danger}
+          onConfirm={onConfirmPending}
+          onCancel={() => setPending(null)}
+        />
+
+        <div>
+          <h3 className="font-display text-lg text-[var(--ink)]">选一个人设</h3>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
+            先选方向或已有人设，下一步再填写具体配置。最多{" "}
+            {MAX_SAVED_PERSONAS} 个。
+          </p>
+        </div>
+
+        {state.workspaces.length > 0 ? (
+          <div>
+            <p className="mb-2 text-xs font-medium text-[var(--ink-soft)]">
+              我的人设
+            </p>
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {state.workspaces.map((s) => {
+                const active = state.activeWorkspaceId === s.id;
+                return (
+                  <li key={s.id}>
+                    <div
+                      className={`studio-shell flex h-full flex-col rounded-2xl px-4 py-4 ${
+                        active ? "border-[var(--coral)]" : ""
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onPickSaved(s.id)}
+                        className="flex-1 text-left"
+                      >
+                        <p className="font-medium text-[var(--ink)]">{s.label}</p>
+                        <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                          {active ? "当前使用 · 点击继续配置" : "点击切换并配置"}
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        className="mt-3 self-start text-xs text-[var(--ink-soft)] hover:text-[var(--ink)]"
+                        onClick={() =>
+                          setPending({
+                            kind: "delete",
+                            id: s.id,
+                            label: s.label,
+                          })
+                        }
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+
+        <div>
+          <p className="mb-2 text-xs font-medium text-[var(--ink-soft)]">
+            起号方向
+          </p>
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {LAUNCH_PRESETS.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => onPickSystem(p.id)}
+                  className="studio-shell h-full w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
+                >
+                  <p className="font-medium text-[var(--ink)]">{p.label}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                    {p.blurb}
+                  </p>
+                </button>
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                onClick={onStartBlank}
+                className="studio-shell h-full w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
+              >
+                <p className="font-medium text-[var(--ink)]">+ 自定义人设</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                  从空白开始填写，适合你自己的细分方向
+                </p>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -202,92 +310,26 @@ export function PersonaPanel() {
         onConfirm={onConfirmPending}
         onCancel={() => setPending(null)}
       />
-      <div className="studio-shell rounded-2xl p-5">
-        <h3 className="font-display text-lg text-[var(--ink)]">创作者人设</h3>
-        <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          每人设有独立笔记库。可切换起号方向或新建（最多 {MAX_SAVED_PERSONAS}{" "}
-          个）。
-        </p>
 
-        <p className="mt-4 text-xs font-medium text-[var(--ink-soft)]">起号方向</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {LAUNCH_PRESETS.map((p) => (
-            <Button
-              key={p.id}
-              type="button"
-              size="sm"
-              variant={
-                systemActive && draft.presetId === p.id ? "default" : "outline"
-              }
-              className={
-                systemActive && draft.presetId === p.id
-                  ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-                  : ""
-              }
-              onClick={() => onPickSystem(p.id)}
-            >
-              {p.label}
-            </Button>
-          ))}
-          <Button
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <button
             type="button"
-            size="sm"
-            variant={!activeSaved && draft.presetId === "custom" ? "default" : "outline"}
-            className={
-              !activeSaved && draft.presetId === "custom"
-                ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-                : ""
-            }
-            onClick={onStartBlank}
+            className="text-sm text-[var(--ink-soft)] hover:text-[var(--ink)]"
+            onClick={() => {
+              setSavedHint(null);
+              setStep("pick");
+            }}
           >
-            + 新建自定义
-          </Button>
+            ← 返回选人设
+          </button>
+          <h3 className="font-display mt-1 text-lg text-[var(--ink)]">
+            配置「{currentLabel}」
+          </h3>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
+            改完点保存即可；若要按新人设重排待写选题，用「保存并重算」。
+          </p>
         </div>
-
-        <p className="mt-4 text-xs font-medium text-[var(--ink-soft)]">
-          我的人设（{state.workspaces.length}/{MAX_SAVED_PERSONAS}）
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {state.workspaces.length === 0 ? (
-            <p className="text-xs text-[var(--ink-soft)]">
-              还没有人设。回首页选一个起号方向，或点「新建自定义」。
-            </p>
-          ) : (
-            state.workspaces.map((s) => (
-              <div key={s.id} className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={activeSaved === s.id ? "default" : "outline"}
-                  className={
-                    activeSaved === s.id
-                      ? "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-                      : ""
-                  }
-                  onClick={() => onPickSaved(s.id)}
-                >
-                  {s.label}
-                </Button>
-                <button
-                  type="button"
-                  className="rounded-md px-1.5 text-xs text-[var(--ink-soft)] hover:bg-white/70 hover:text-[var(--ink)]"
-                  title="删除"
-                  onClick={() => onDeleteSaved(s.id, s.label)}
-                >
-                  ×
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-        <p className="mt-2 text-xs text-[var(--ink-soft)]">
-          {activeSaved
-            ? `当前：「${state.workspaces.find((s) => s.id === activeSaved)?.label ?? ""}」`
-            : LAUNCH_PRESETS.find((p) => p.id === draft.presetId)?.blurb ||
-              (draft.presetId === "custom"
-                ? "空白自定义：填写后保存"
-                : "")}
-        </p>
       </div>
 
       <div className="studio-shell rounded-2xl p-5">
@@ -298,7 +340,7 @@ export function PersonaPanel() {
               id="persona-name"
               value={fields.name}
               onChange={(e) => patchField("name", e.target.value)}
-              placeholder="如：美食博主"
+              placeholder="如：家居博主"
             />
           </div>
           <div className="space-y-2">
@@ -327,7 +369,7 @@ export function PersonaPanel() {
               id="persona-bg"
               value={fields.background}
               onChange={(e) => patchField("background", e.target.value)}
-              placeholder="如：家常菜 / 探店"
+              placeholder="如：租房改造 / 小户型"
             />
           </div>
         </div>
@@ -373,7 +415,7 @@ export function PersonaPanel() {
             value={fields.noteTagsText}
             onChange={(e) => patchField("noteTagsText", e.target.value)}
             className="min-h-16 bg-white/80"
-            placeholder="#美食 #家常菜 #探店"
+            placeholder="#家居 #收纳 #真实分享"
           />
         </div>
 
@@ -384,28 +426,14 @@ export function PersonaPanel() {
           <Button
             type="button"
             className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-            onClick={onSaveAndRebuild}
+            onClick={() => setPending({ kind: "rebuild" })}
           >
-            保存并重算最近一周
+            保存并重算
           </Button>
         </div>
         {savedHint ? (
           <p className="mt-3 text-sm text-[var(--ink-soft)]">{savedHint}</p>
         ) : null}
-      </div>
-
-      <div className="studio-shell rounded-2xl p-5 text-sm text-[var(--ink-soft)]">
-        <p>
-          当前生效：{state.persona.name} · {state.persona.age}岁
-          {state.persona.background ? ` · ${state.persona.background}` : ""}
-        </p>
-        <p className="mt-1">
-          日历阶段标签：{state.persona.phases.map((p) => p.label).join(" → ")}
-        </p>
-        <p className="mt-1 text-xs">
-          「保存」：已有人设则更新，新建则加入列表（最多 {MAX_SAVED_PERSONAS}{" "}
-          个）。「保存并重算最近一周」会清空其他待写周，只保留已起草/已发布，并新生成未来一周。需要更长规划时，到日历点「生成更多」。
-        </p>
       </div>
     </div>
   );

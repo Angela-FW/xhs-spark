@@ -34,6 +34,7 @@ export type PillarId =
 
 export type PresetId =
   | "home"
+  | "beauty"
   | "auto"
   | "resign"
   | "career-daily"
@@ -50,6 +51,7 @@ export function normalizePresetId(id: string | undefined | null): PresetId {
   if (id === "career-growth") return "career-daily";
   if (
     id === "home" ||
+    id === "beauty" ||
     id === "auto" ||
     id === "resign" ||
     id === "career-daily" ||
@@ -1134,6 +1136,38 @@ export const PERSONA_PRESETS: {
     },
   },
   {
+    id: "beauty",
+    label: "美妆博主",
+    blurb: "真实妆容与空瓶分享，先共鸣再给可抄步骤",
+    persona: {
+      presetId: "beauty",
+      name: "美妆博主",
+      age: 26,
+      gender: "女",
+      background: "日常妆 / 空瓶党",
+      stage: "图文起号：用真实妆效拉新涨粉",
+      voice: "好抄、讲清肤质与雷点；不装精致，空瓶比安利更真诚。",
+      audience: "想学日常妆、在意踩雷避坑的女生",
+      trustAnchors: [
+        "只写自己用过的产品",
+        "肤质和场景说清楚",
+        "避雷比安利更优先",
+      ],
+      topicSeeds: {
+        restart: [],
+        "age-edu": [],
+        resume: [],
+        interview: [],
+        rejection: [],
+        choice: [],
+        life: [],
+      },
+      phases: LAUNCH_PHASES.map((p) => ({ ...p })),
+      noteTags: ["#美妆", "#日常妆", "#空瓶分享", "#化妆教程", "#真实分享"],
+      contentMix: "life",
+    },
+  },
+  {
     id: "auto",
     label: "汽车博主",
     blurb: "用车真实体验与避坑，适合新手车主起号",
@@ -1472,11 +1506,35 @@ const AUTO_NOMINALS = [
   "和家人共用一辆车的边界",
 ];
 
+const BEAUTY_NOMINALS = [
+  "五分钟通勤妆步骤",
+  "这支空瓶我真的会回购",
+  "黄皮试色避雷实录",
+  "新手眼影只买这一盘",
+  "底妆卡粉我怎么救",
+  "敏感肌也能用的卸妆",
+  "约会妆和日常妆怎么切换",
+  "口红颜色这样挑不踩雷",
+  "刷子清洁我每周这样做",
+  "素颜护肤三步就够",
+  "眼线画飘了我的修正法",
+  "平价替代贵妇空瓶",
+  "夏天妆容不脱妆清单",
+  "第一次学修容翻车记",
+  "眉毛形状我怎么定",
+  "妆前妆后同款光线对比",
+];
+
 const DOMAIN_PACKS: { test: RegExp; label: string; nominals: string[] }[] = [
   {
     test: /家居|收纳|软装|装修|租房改造|小户型|桌面|动线/,
     label: "家居",
     nominals: HOME_NOMINALS,
+  },
+  {
+    test: /美妆|化妆|口红|底妆|护肤|空瓶|妆容|眼影/,
+    label: "美妆",
+    nominals: BEAUTY_NOMINALS,
   },
   {
     test: /汽车|车主|开车|试驾|油耗|保养|停车|车内/,
@@ -1724,6 +1782,14 @@ export function ensurePersonaTopicSeeds(
     return {
       ...p,
       topicSeeds: seedsFromNominals(HOME_NOMINALS, p.name),
+      contentMix: "life",
+      phases: LAUNCH_PHASES.map((x) => ({ ...x })),
+    };
+  }
+  if (presetId === "beauty") {
+    return {
+      ...p,
+      topicSeeds: seedsFromNominals(BEAUTY_NOMINALS, p.name),
       contentMix: "life",
       phases: LAUNCH_PHASES.map((x) => ({ ...x })),
     };

@@ -117,7 +117,8 @@
 }
 
 .hero-panel {
-  min-height: min(42vh, 360px);
+  /* Keep hero compact so copy sits close to the content below */
+  min-height: 0;
 }
 
 .hero-glow {
@@ -157,6 +158,14 @@
   animation: rise-in 0.55s ease-out both;
 }
 
+.launch-bridge {
+  animation: rise-in 0.4s ease-out both;
+}
+
+.launch-pulse {
+  animation: launch-pulse 1.1s ease-in-out infinite;
+}
+
 @keyframes drift {
   from {
     transform: translate3d(-2%, 0, 0) scale(1);
@@ -177,9 +186,23 @@
   }
 }
 
+@keyframes launch-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scaleX(0.55);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hero-glow,
-  .result-enter {
+  .result-enter,
+  .launch-bridge,
+  .launch-pulse {
     animation: none !important;
   }
 }
