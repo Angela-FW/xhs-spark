@@ -10,12 +10,15 @@ import {
 import {
   DEFAULT_PERSONA,
   MAX_SAVED_PERSONAS,
+  PERSONA_PRESETS,
   clonePersona,
   defaultCalendarStart,
   ensurePersonaTopicSeeds,
+  getPreset,
   normalizePersona,
   type CreatorPersona,
   type PillarId,
+  type PresetId,
   type SavedPersonaSlot,
 } from "./persona";
 
@@ -84,15 +87,33 @@ export type ChatMessage = {
   pendingId?: string;
 };
 
-export type AppState = {
-  version: 3;
+/** One persona + its isolated notes / calendar / soft data. */
+export type PersonaWorkspace = {
+  id: string;
+  label: string;
   persona: CreatorPersona;
-  /** User-saved custom personas, max MAX_SAVED_PERSONAS. */
-  savedPersonas: SavedPersonaSlot[];
-  /** Currently selected saved slot id, if any. */
-  activeSavedPersonaId: string | null;
+  updatedAt: string;
   calendarStart: string;
-  /** Last local day the unpublished schedule was rolled to. */
+  scheduleAsOf: string;
+  posts: CalendarPost[];
+  weekMeta: { week: number; postsPerWeek: number }[];
+  insights: InsightCard[];
+  selectedPostId: string | null;
+  feedback: FeedbackEntry[];
+  weights: PillarWeights;
+  pending: PendingCalibration | null;
+  snapshots: CalibrationSnapshot[];
+  chat: ChatMessage[];
+};
+
+export type AppState = {
+  version: 4;
+  /** null → show launch-direction onboarding */
+  activeWorkspaceId: string | null;
+  workspaces: PersonaWorkspace[];
+  /** Active workspace mirror (kept for existing UI). */
+  persona: CreatorPersona;
+  calendarStart: string;
   scheduleAsOf: string;
   posts: CalendarPost[];
   weekMeta: { week: number; postsPerWeek: number }[];
@@ -104,6 +125,9 @@ export type AppState = {
   chat: ChatMessage[];
   selectedPostId: string | null;
 };
+
+/** How many weeks to generate when starting / resetting a persona path. */
+export const INITIAL_PLAN_WEEKS = 4;
 
 const STORAGE_KEY = "restart-life-planner-v3";
 const LEGACY_KEYS = ["restart-life-planner-v2", "restart-life-planner-v1"];
@@ -121,29 +145,124 @@ export const DEFAULT_WEIGHTS: PillarWeights = {
 function welcomeChat(persona: CreatorPersona): ChatMessage {
   const mixHint =
     persona.contentMix === "life"
-      ? "偏生活切片，穿插少量选择与关系议题"
+      ? "先破冰认识你，再给可带走的具体方法"
       : persona.contentMix === "career"
-        ? "偏职场成长，穿插生活节律"
-        : "第一个月每周1篇建立信任；第二个月起每周2篇，并穿插生活进展";
+        ? "用真实职场日常建立信任，再谈方法"
+        : "第一个月慢热建立信任，再穿插干货与生活";
   return {
     id: "welcome",
     role: "assistant",
-    text: `你好，当前人设是「${persona.name}」。${mixHint}。`,
+    text: `你好，当前人设是「${persona.name}」。${mixHint}。未来 ${INITIAL_PLAN_WEEKS} 周路线已排好，可往后翻继续生成。`,
     createdAt: new Date().toISOString(),
   };
 }
 
-export function createInitialState(
-  persona: CreatorPersona = DEFAULT_PERSONA,
-): AppState {
-  const p = clonePersona(persona);
+function newWorkspaceId() {
+  return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function emptyActiveMirror(persona: CreatorPersona = DEFAULT_PERSONA): Omit<
+  AppState,
+  "version" | "activeWorkspaceId" | "workspaces"
+> {
+  const p = ensurePersonaTopicSeeds(clonePersona(persona));
   const today = todayLocal();
-  const cal = buildYearCalendar(defaultCalendarStart(), p, 1);
   return {
-    version: 3,
     persona: p,
-    savedPersonas: [],
-    activeSavedPersonaId: null,
+    calendarStart: defaultCalendarStart(),
+    scheduleAsOf: today,
+    posts: [],
+    weekMeta: [],
+    insights: [],
+    feedback: [],
+    weights: { ...DEFAULT_WEIGHTS },
+    pending: null,
+    snapshots: [],
+    chat: [],
+    selectedPostId: null,
+  };
+}
+
+function workspaceFromMirror(
+  state: AppState,
+  id: string,
+  label?: string,
+): PersonaWorkspace {
+  return {
+    id,
+    label: (label || state.persona.name || "未命名人设").trim(),
+    persona: clonePersona(state.persona),
+    updatedAt: new Date().toISOString(),
+    calendarStart: state.calendarStart,
+    scheduleAsOf: state.scheduleAsOf,
+    posts: state.posts,
+    weekMeta: state.weekMeta,
+    insights: state.insights,
+    selectedPostId: state.selectedPostId,
+    feedback: state.feedback,
+    weights: { ...state.weights },
+    pending: state.pending,
+    snapshots: state.snapshots,
+    chat: state.chat,
+  };
+}
+
+function mirrorFromWorkspace(ws: PersonaWorkspace): Omit<
+  AppState,
+  "version" | "activeWorkspaceId" | "workspaces"
+> {
+  return {
+    persona: ensurePersonaTopicSeeds(clonePersona(ws.persona)),
+    calendarStart: ws.calendarStart,
+    scheduleAsOf: ws.scheduleAsOf,
+    posts: ws.posts,
+    weekMeta: ws.weekMeta,
+    insights: ws.insights,
+    feedback: ws.feedback,
+    weights: { ...ws.weights },
+    pending: ws.pending,
+    snapshots: ws.snapshots,
+    chat: ws.chat,
+    selectedPostId: ws.selectedPostId,
+  };
+}
+
+/** Persist active mirror into workspaces[]. */
+export function syncActiveWorkspace(state: AppState): AppState {
+  if (!state.activeWorkspaceId) return state;
+  const idx = state.workspaces.findIndex((w) => w.id === state.activeWorkspaceId);
+  if (idx < 0) return state;
+  const workspaces = [...state.workspaces];
+  workspaces[idx] = workspaceFromMirror(state, state.activeWorkspaceId, workspaces[idx].label);
+  return { ...state, workspaces };
+}
+
+export function createInitialState(): AppState {
+  return {
+    version: 4,
+    activeWorkspaceId: null,
+    workspaces: [],
+    ...emptyActiveMirror(),
+  };
+}
+
+/** Start a new persona workspace from a launch preset (keeps other workspaces). */
+export function startFromPreset(state: AppState, presetId: PresetId): AppState {
+  const flushed = syncActiveWorkspace(state);
+  if (flushed.workspaces.length >= MAX_SAVED_PERSONAS) {
+    return flushed;
+  }
+  const persona = ensurePersonaTopicSeeds(getPreset(presetId));
+  const today = todayLocal();
+  const cal = buildYearCalendar(defaultCalendarStart(), persona, INITIAL_PLAN_WEEKS);
+  const id = newWorkspaceId();
+  const label =
+    PERSONA_PRESETS.find((p) => p.id === presetId)?.label || persona.name;
+  const ws: PersonaWorkspace = {
+    id,
+    label,
+    persona,
+    updatedAt: new Date().toISOString(),
     calendarStart: cal.startDate,
     scheduleAsOf: today,
     posts: cal.posts,
@@ -152,12 +271,50 @@ export function createInitialState(
       postsPerWeek: w.postsPerWeek,
     })),
     insights: [],
+    selectedPostId: cal.posts[0]?.id ?? null,
     feedback: [],
     weights: { ...DEFAULT_WEIGHTS },
     pending: null,
     snapshots: [],
-    chat: [welcomeChat(p)],
-    selectedPostId: cal.posts[0]?.id ?? null,
+    chat: [welcomeChat(persona)],
+  };
+  return {
+    ...flushed,
+    version: 4,
+    activeWorkspaceId: id,
+    workspaces: [...flushed.workspaces, ws],
+    ...mirrorFromWorkspace(ws),
+  };
+}
+
+export function activateWorkspace(state: AppState, id: string): AppState {
+  const flushed = syncActiveWorkspace(state);
+  const ws = flushed.workspaces.find((w) => w.id === id);
+  if (!ws) return flushed;
+  return {
+    ...flushed,
+    activeWorkspaceId: id,
+    ...mirrorFromWorkspace(ws),
+  };
+}
+
+export function deleteWorkspace(state: AppState, id: string): AppState {
+  const flushed = syncActiveWorkspace(state);
+  const workspaces = flushed.workspaces.filter((w) => w.id !== id);
+  if (flushed.activeWorkspaceId !== id) {
+    return { ...flushed, workspaces };
+  }
+  const next = workspaces[0];
+  if (!next) {
+    return {
+      ...createInitialState(),
+    };
+  }
+  return {
+    ...flushed,
+    workspaces,
+    activeWorkspaceId: next.id,
+    ...mirrorFromWorkspace(next),
   };
 }
 
@@ -283,7 +440,7 @@ export function rebuildFullCalendarFromPersona(
 
   return {
     ...state,
-    version: 3,
+    version: 4,
     persona: p,
     calendarStart: cal.startDate,
     scheduleAsOf: today,
@@ -302,7 +459,7 @@ export function rebuildFullCalendarFromPersona(
 
 /**
  * Rebuild from persona: drop other *planned* weeks; keep published + drafted.
- * Generate only the next future week of planned posts.
+ * If nothing locked, seed the first INITIAL_PLAN_WEEKS weeks.
  */
 export function rebuildCalendarFromPersona(
   state: AppState,
@@ -314,6 +471,29 @@ export function rebuildCalendarFromPersona(
   const locked = state.posts.filter(
     (post) => post.status === "published" || post.status === "drafted",
   );
+
+  if (!locked.length) {
+    const start = mondayOnOrAfter(
+      calendarStart || state.calendarStart || defaultCalendarStart(),
+    );
+    const cal = buildYearCalendar(start, p, INITIAL_PLAN_WEEKS);
+    return {
+      ...state,
+      version: 4,
+      persona: p,
+      calendarStart: cal.startDate,
+      scheduleAsOf: today,
+      posts: cal.posts,
+      weekMeta: cal.weeks.map((w) => ({
+        week: w.week,
+        postsPerWeek: w.postsPerWeek,
+      })),
+      pending: null,
+      selectedPostId: cal.posts[0]?.id ?? null,
+      chat: state.chat.length ? state.chat : [welcomeChat(p)],
+    };
+  }
+
   const usedTitles = new Set(locked.map((post) => post.titleHint));
 
   const maxWeek = locked.reduce((max, post) => Math.max(max, post.week), 0);
@@ -331,10 +511,6 @@ export function rebuildCalendarFromPersona(
       );
     const afterLatest = addDays(latestWeekStart, 7);
     nextWeekStart = afterLatest >= todayMonday ? afterLatest : todayMonday;
-  } else if (calendarStart || state.calendarStart) {
-    nextWeekStart = mondayOnOrAfter(
-      calendarStart || state.calendarStart || today,
-    );
   }
 
   const built = buildWeekPosts({
@@ -368,7 +544,7 @@ export function rebuildCalendarFromPersona(
 
   return {
     ...state,
-    version: 3,
+    version: 4,
     persona: p,
     calendarStart:
       state.calendarStart || calendarStart || nextWeekStart,
@@ -446,7 +622,7 @@ function newSavedId() {
   return `saved-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** Save / update current persona into the custom list (max 10). */
+/** Save / update current persona into the active workspace (or create one). */
 export function upsertSavedPersona(
   state: AppState,
   persona: CreatorPersona,
@@ -454,51 +630,62 @@ export function upsertSavedPersona(
 ): { state: AppState; error?: string; id?: string } {
   const ready = ensurePersonaTopicSeeds({
     ...clonePersona(persona),
-    presetId: "custom",
+    presetId: persona.presetId === "custom" ? "custom" : persona.presetId,
   });
   const label = (opts?.label || ready.name || "未命名人设").trim();
-  const list = [...state.savedPersonas];
-  const existingId = opts?.id ?? state.activeSavedPersonaId;
-  const idx = existingId ? list.findIndex((s) => s.id === existingId) : -1;
+  const flushed = syncActiveWorkspace(state);
+  const existingId = opts?.id ?? flushed.activeWorkspaceId;
 
-  if (idx >= 0) {
-    list[idx] = {
-      ...list[idx],
-      label,
-      persona: ready,
-      updatedAt: new Date().toISOString(),
-    };
-    return {
-      state: {
-        ...state,
+  if (existingId) {
+    const idx = flushed.workspaces.findIndex((w) => w.id === existingId);
+    if (idx >= 0) {
+      const withPersona = {
+        ...flushed,
+        activeWorkspaceId: existingId,
         persona: ready,
-        savedPersonas: list,
-        activeSavedPersonaId: list[idx].id,
-      },
-      id: list[idx].id,
-    };
+      };
+      const workspaces = [...flushed.workspaces];
+      workspaces[idx] = {
+        ...workspaceFromMirror(withPersona, existingId, label),
+        label,
+      };
+      return {
+        state: {
+          ...withPersona,
+          workspaces,
+        },
+        id: existingId,
+      };
+    }
   }
 
-  if (list.length >= MAX_SAVED_PERSONAS) {
+  if (flushed.workspaces.length >= MAX_SAVED_PERSONAS) {
     return {
-      state,
-      error: `自定义人设最多 ${MAX_SAVED_PERSONAS} 个，请先删除一个再保存`,
+      state: flushed,
+      error: `人设最多 ${MAX_SAVED_PERSONAS} 个，请先删除一个再保存`,
     };
   }
 
-  const id = newSavedId();
-  list.push({
-    id,
-    label,
-    persona: ready,
-    updatedAt: new Date().toISOString(),
-  });
+  const id = newWorkspaceId();
+  const seeded = rebuildCalendarFromPersona(
+    {
+      ...flushed,
+      activeWorkspaceId: id,
+      persona: ready,
+      posts: [],
+      weekMeta: [],
+      insights: [],
+      selectedPostId: null,
+      chat: [welcomeChat(ready)],
+    },
+    ready,
+  );
+  const ws = workspaceFromMirror(seeded, id, label);
   return {
     state: {
-      ...state,
-      persona: ready,
-      savedPersonas: list,
-      activeSavedPersonaId: id,
+      ...seeded,
+      activeWorkspaceId: id,
+      workspaces: [...flushed.workspaces, ws],
     },
     id,
   };
@@ -508,25 +695,14 @@ export function deleteSavedPersona(
   state: AppState,
   id: string,
 ): AppState {
-  const savedPersonas = state.savedPersonas.filter((s) => s.id !== id);
-  return {
-    ...state,
-    savedPersonas,
-    activeSavedPersonaId:
-      state.activeSavedPersonaId === id ? null : state.activeSavedPersonaId,
-  };
+  return deleteWorkspace(state, id);
 }
 
 export function selectSavedPersona(
   state: AppState,
   id: string,
 ): AppState {
-  const slot = state.savedPersonas.find((s) => s.id === id);
-  if (!slot) return state;
-  return rebuildCalendarFromPersona(
-    { ...state, activeSavedPersonaId: id },
-    slot.persona,
-  );
+  return activateWorkspace(state, id);
 }
 
 function migrateParsed(
@@ -636,7 +812,7 @@ export function loadState(): AppState {
 
 export function saveState(state: AppState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(syncActiveWorkspace(state)));
 }
 
 export function exportState(state: AppState): string {
@@ -645,9 +821,6 @@ export function exportState(state: AppState): string {
 
 export function importState(json: string): AppState {
   const parsed = JSON.parse(json) as Partial<AppState> & { version: number };
-  if (!Array.isArray(parsed.posts) && parsed.version !== 3) {
-    // allow persona-only? still require posts or rebuild
-  }
   return migrateParsed(parsed);
 }
 

@@ -113,9 +113,8 @@ function CoverKeysSyncBridge() {
 function PlannerInner() {
   const [tab, setTab] = useState<TabId>("calendar");
   const [generateOpen, setGenerateOpen] = useState(false);
-  const { exportJson, importJson, state, setSelectedPostId } = useAppStore();
+  const { state, setSelectedPostId } = useAppStore();
   const { authEnabled, user, openAuth, signOut } = useAuth();
-  const fileRef = useRef<HTMLInputElement>(null);
   const [mounted, setMounted] = useState(false);
   const persona = state.persona;
 
@@ -168,32 +167,6 @@ function PlannerInner() {
             生成小红书文案与免费封面图，不生成视频。随便逛无需登录；点「生成」时再注册。
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                const blob = new Blob([exportJson()], {
-                  type: "application/json",
-                });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `restart-planner-backup-${state.calendarStart}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-            >
-              导出备份
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => fileRef.current?.click()}
-            >
-              导入备份
-            </Button>
             {authEnabled ? (
               user ? (
                 <Button
@@ -215,22 +188,6 @@ function PlannerInner() {
                 </Button>
               )
             ) : null}
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                try {
-                  importJson(await file.text());
-                } catch {
-                  alert("导入失败，请检查备份文件");
-                }
-                e.target.value = "";
-              }}
-            />
           </div>
         </div>
       </header>

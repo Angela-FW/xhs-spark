@@ -33,10 +33,33 @@ export type PillarId =
   | "life";
 
 export type PresetId =
-  | "job-restart"
-  | "career-growth"
+  | "home"
+  | "auto"
+  | "resign"
+  | "career-daily"
   | "life-journal"
-  | "custom";
+  | "custom"
+  /** @deprecated migrated to resign */
+  | "job-restart"
+  /** @deprecated migrated to career-daily */
+  | "career-growth";
+
+/** Map legacy preset ids from older local/cloud state. */
+export function normalizePresetId(id: string | undefined | null): PresetId {
+  if (id === "job-restart") return "resign";
+  if (id === "career-growth") return "career-daily";
+  if (
+    id === "home" ||
+    id === "auto" ||
+    id === "resign" ||
+    id === "career-daily" ||
+    id === "life-journal" ||
+    id === "custom"
+  ) {
+    return id;
+  }
+  return "life-journal";
+}
 
 export type TopicSeed = {
   title: string;
@@ -225,6 +248,38 @@ const LIFE_PHASES: PhaseDef[] = [
     weekFrom: 37,
     weekTo: 52,
     focus: "季节感、变化与未完成清单",
+  },
+];
+
+/** 图文起号通用阶段：前 4 周破冰+价值，后面互动与长线。 */
+const LAUNCH_PHASES: PhaseDef[] = [
+  {
+    id: 1,
+    label: "破冰认识我",
+    weekFrom: 1,
+    weekTo: 2,
+    focus: "人设亮相与共鸣切片，先让人记住你是谁",
+  },
+  {
+    id: 2,
+    label: "价值站稳",
+    weekFrom: 3,
+    weekTo: 4,
+    focus: "可带走的方法/清单，建立专业信任，服务涨粉",
+  },
+  {
+    id: 3,
+    label: "互动加深",
+    weekFrom: 5,
+    weekTo: 12,
+    focus: "系列栏目、评论区话题、稳定更新节奏",
+  },
+  {
+    id: 4,
+    label: "长线经营",
+    weekFrom: 13,
+    weekTo: 52,
+    focus: "深挖细分选题，沉淀人设资产",
   },
 ];
 
@@ -1047,43 +1102,105 @@ export const PERSONA_PRESETS: {
   persona: CreatorPersona;
 }[] = [
   {
-    id: "job-restart",
-    label: "求职重启",
-    blurb: "离职/求职叙事，干货与生活穿插",
+    id: "home",
+    label: "家居博主",
+    blurb: "收纳改造与松弛家居，前 4 周先认识你再给方法",
     persona: {
-      presetId: "job-restart",
-      name: "重启求职博主",
+      presetId: "home",
+      name: "家居博主",
+      age: 28,
+      gender: "女",
+      background: "租房改造 / 小户型",
+      stage: "图文起号：用真实家居场景涨粉",
+      voice: "具体、好抄、不装精致；前后对比和清单优先。",
+      audience: "想把小家过舒服的年轻人",
+      trustAnchors: [
+        "只写自己动手做过的改造",
+        "价格与尺寸说清楚",
+        "避雷比安利更真诚",
+      ],
+      topicSeeds: {
+        restart: [],
+        "age-edu": [],
+        resume: [],
+        interview: [],
+        rejection: [],
+        choice: [],
+        life: [],
+      },
+      phases: LAUNCH_PHASES.map((p) => ({ ...p })),
+      noteTags: ["#家居", "#收纳", "#租房改造", "#小户型", "#真实分享"],
+      contentMix: "life",
+    },
+  },
+  {
+    id: "auto",
+    label: "汽车博主",
+    blurb: "用车真实体验与避坑，适合新手车主起号",
+    persona: {
+      presetId: "auto",
+      name: "汽车博主",
+      age: 30,
+      gender: "",
+      background: "通勤车主",
+      stage: "图文起号：真实用车故事拉新",
+      voice: "白话、可验证、少吹嘘；油耗与坑点写清楚。",
+      audience: "新手司机与在意养车成本的人",
+      trustAnchors: [
+        "数据来自自己的车",
+        "不写软文口吻",
+        "安全提醒放在前面",
+      ],
+      topicSeeds: {
+        restart: [],
+        "age-edu": [],
+        resume: [],
+        interview: [],
+        rejection: [],
+        choice: [],
+        life: [],
+      },
+      phases: LAUNCH_PHASES.map((p) => ({ ...p })),
+      noteTags: ["#汽车", "#用车心得", "#新手司机", "#真实分享"],
+      contentMix: "life",
+    },
+  },
+  {
+    id: "resign",
+    label: "离职博主",
+    blurb: "离职重启与求职过程，慢热建立信任再给干货",
+    persona: {
+      presetId: "resign",
+      name: "离职博主",
       age: 37,
       gender: "女",
       background: "双非本科",
-      stage: "已在找工作：简历打磨 + 求职焦虑",
+      stage: "离职后求职重启：简历 + 真实焦虑",
       voice:
-        "真诚、克制煽情、有具体动作与复盘；现在时叙述，不假装还在离职当天；不做成功学鸡汤。",
-      audience: "30+ 想重启/正在求职、在意年龄与学历标签的女性",
+        "真诚、克制煽情、有具体动作与复盘；现在时叙述，不做成功学鸡汤。",
+      audience: "30+ 想重启/正在求职、在意年龄与学历标签的人",
       trustAnchors: [...JOB_TRUST],
       topicSeeds: cloneSeeds(JOB_SEEDS),
       phases: JOB_PHASES.map((p) => ({ ...p })),
       noteTags: [
+        "#离职",
         "#求职",
         "#离职重启",
-        "#大龄求职",
-        "#双非",
         "#真实分享",
-        "#职场女性",
+        "#职场",
         "#简历",
         "#面试",
-        "#生活记录",
       ],
       contentMix: "job",
     },
   },
   {
-    id: "career-growth",
-    label: "职场成长",
-    blurb: "在职成长、协作与边界，少成功学",
+    id: "career-daily",
+    label: "职场日常",
+    blurb: "在职真实一周：协作、边界与节律",
     persona: {
-      presetId: "career-growth",
-      name: "职场成长记录者",
+      presetId: "career-daily",
+      name: "职场日常",
       age: 32,
       gender: "女",
       background: "互联网从业",
@@ -1093,34 +1210,27 @@ export const PERSONA_PRESETS: {
       trustAnchors: [...CAREER_TRUST],
       topicSeeds: cloneSeeds(CAREER_SEEDS),
       phases: CAREER_PHASES.map((p) => ({ ...p })),
-      noteTags: [
-        "#职场",
-        "#成长记录",
-        "#工作方法",
-        "#向上管理",
-        "#真实分享",
-        "#生活与工作",
-      ],
+      noteTags: ["#职场日常", "#工作方法", "#真实分享", "#生活与工作"],
       contentMix: "career",
     },
   },
   {
     id: "life-journal",
     label: "生活记录",
-    blurb: "日常切片、关系与节律为主",
+    blurb: "日常切片起号，用真实日子拉近距离",
     persona: {
       presetId: "life-journal",
-      name: "生活记录者",
+      name: "生活记录",
       age: 30,
       gender: "女",
       background: "城市生活",
-      stage: "认真过日常：节律、关系与小选择",
+      stage: "图文起号：认真过日常",
       voice: "轻、具体、不装精致；情绪可以有，结尾落到动作。",
       audience: "想把日子过明白、喜欢真实日常的人",
       trustAnchors: [...LIFE_TRUST],
       topicSeeds: cloneSeeds(LIFE_SEEDS),
-      phases: LIFE_PHASES.map((p) => ({ ...p })),
-      noteTags: ["#生活记录", "#日常", "#真实分享", "#慢慢生活", "#情绪"],
+      phases: LAUNCH_PHASES.map((p) => ({ ...p })),
+      noteTags: ["#生活记录", "#日常", "#真实分享", "#慢慢生活"],
       contentMix: "life",
     },
   },
@@ -1147,15 +1257,18 @@ export const PERSONA_PRESETS: {
         choice: [],
         life: [],
       },
-      phases: LIFE_PHASES.map((p) => ({ ...p })),
+      phases: LAUNCH_PHASES.map((p) => ({ ...p })),
       noteTags: ["#真实分享", "#创作日常"],
       contentMix: "life",
     },
   },
 ];
 
+/** 起号方向（不含自定义），用于首页引导。 */
+export const LAUNCH_PRESETS = PERSONA_PRESETS.filter((p) => p.id !== "custom");
+
 export const DEFAULT_PERSONA: CreatorPersona = clonePersona(
-  PERSONA_PRESETS[0].persona,
+  PERSONA_PRESETS.find((p) => p.id === "life-journal")!.persona,
 );
 
 /** @deprecated Prefer DEFAULT_PERSONA / state.persona */
@@ -1172,8 +1285,11 @@ export function clonePersona(persona: CreatorPersona): CreatorPersona {
 }
 
 export function getPreset(id: PresetId): CreatorPersona {
-  const found = PERSONA_PRESETS.find((p) => p.id === id)?.persona;
-  return clonePersona(found ?? PERSONA_PRESETS[0].persona);
+  const normalized = normalizePresetId(id);
+  const found = PERSONA_PRESETS.find((p) => p.id === normalized)?.persona;
+  return clonePersona(
+    found ?? PERSONA_PRESETS.find((p) => p.id === "life-journal")!.persona,
+  );
 }
 
 export function personaIdentityLine(persona: CreatorPersona): string {
@@ -1196,7 +1312,9 @@ export function normalizePersona(
 ): CreatorPersona {
   const base = clonePersona(DEFAULT_PERSONA);
   if (!raw || typeof raw !== "object") return base;
-  const presetId = (raw.presetId as PresetId) || base.presetId;
+  const presetId = normalizePresetId(
+    (raw.presetId as PresetId) || base.presetId,
+  );
   const fromPreset =
     PERSONA_PRESETS.find((p) => p.id === presetId)?.persona ?? base;
   return {
@@ -1316,7 +1434,55 @@ export function topicSeedsAreEmpty(
   );
 }
 
+const HOME_NOMINALS = [
+  "出租屋第一次改造",
+  "周末收纳断舍离",
+  "灯光换了心情也换了",
+  "小户型动线复盘",
+  "便宜好用的收纳神器",
+  "沙发区这样摆更松弛",
+  "厨房台面清空术",
+  "阳台变成小小绿意角",
+  "租房也能有仪式感",
+  "对照片友好的角落",
+  "一平米改造前后",
+  "客卧变书房的周末",
+  "软装配色避雷",
+  "搬家三天清单",
+  "夜灯氛围感练习",
+  "桌面极简但好用",
+];
+
+const AUTO_NOMINALS = [
+  "新手第一次上路紧张点",
+  "保养别被忽悠的三句话",
+  "周末洗车我只做这些",
+  "通勤油耗真实账",
+  "停车位选择血泪史",
+  "车上常备急救包清单",
+  "雨天开车我改掉的习惯",
+  "试驾十分钟看什么",
+  "车内收纳不杂乱",
+  "长途前夜检查单",
+  "配件只买必要的",
+  "第一次独自高速",
+  "爱车小伤怎么处理",
+  "加油优惠我怎么比",
+  "夜间开车护眼习惯",
+  "和家人共用一辆车的边界",
+];
+
 const DOMAIN_PACKS: { test: RegExp; label: string; nominals: string[] }[] = [
+  {
+    test: /家居|收纳|软装|装修|租房改造|小户型|桌面|动线/,
+    label: "家居",
+    nominals: HOME_NOMINALS,
+  },
+  {
+    test: /汽车|车主|开车|试驾|油耗|保养|停车|车内/,
+    label: "汽车",
+    nominals: AUTO_NOMINALS,
+  },
   {
     test: /美食|做饭|探店|下厨|烘焙|菜谱|吃货|料理|食堂|宵夜|家常菜/,
     label: "美食",
@@ -1551,16 +1717,34 @@ export function ensurePersonaTopicSeeds(
   persona: CreatorPersona,
 ): CreatorPersona {
   const p = clonePersona(persona);
+  const presetId = normalizePresetId(p.presetId);
+  p.presetId = presetId;
 
-  if (
-    p.presetId === "job-restart" ||
-    p.presetId === "career-growth" ||
-    p.presetId === "life-journal"
-  ) {
-    const fromPreset = getPreset(p.presetId);
+  if (presetId === "home") {
     return {
       ...p,
-      // Always restore curated calendar seeds for system presets
+      topicSeeds: seedsFromNominals(HOME_NOMINALS, p.name),
+      contentMix: "life",
+      phases: LAUNCH_PHASES.map((x) => ({ ...x })),
+    };
+  }
+  if (presetId === "auto") {
+    return {
+      ...p,
+      topicSeeds: seedsFromNominals(AUTO_NOMINALS, p.name),
+      contentMix: "life",
+      phases: LAUNCH_PHASES.map((x) => ({ ...x })),
+    };
+  }
+  if (
+    presetId === "resign" ||
+    presetId === "career-daily" ||
+    presetId === "life-journal"
+  ) {
+    const fromPreset =
+      PERSONA_PRESETS.find((x) => x.id === presetId)?.persona ?? p;
+    return {
+      ...p,
       topicSeeds: cloneSeeds(fromPreset.topicSeeds),
       contentMix: fromPreset.contentMix,
       phases: fromPreset.phases.map((x) => ({ ...x })),

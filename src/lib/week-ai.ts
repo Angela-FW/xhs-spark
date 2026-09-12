@@ -1,7 +1,6 @@
 "use client";
 
 import { withAuthHeaders } from "@/lib/auth-fetch";
-import { loadCoverKeys } from "@/lib/cover-keys";
 import type { CreatorPersona } from "@/lib/persona";
 import type { CalendarPost } from "@/lib/year-calendar";
 
@@ -17,7 +16,6 @@ export async function generateWeekTopicsWithAi(
   posts: CalendarPost[],
   usedTitles: string[],
 ): Promise<WeekTopicPatch[]> {
-  const keys = loadCoverKeys();
   const res = await fetch("/api/week-topics", {
     method: "POST",
     headers: await withAuthHeaders({ "Content-Type": "application/json" }),
@@ -37,8 +35,6 @@ export async function generateWeekTopicsWithAi(
         phase: p.phase,
       })),
       usedTitles,
-      cloudflareAccountId: keys.cloudflareAccountId,
-      cloudflareToken: keys.cloudflareToken,
     }),
   });
 

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { isAuthConfigured } from "@/lib/cloud-env";
 import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -17,29 +16,16 @@ type NoteGenerateBody = {
     background?: string;
   };
   extraNote?: string;
-  cloudflareAccountId?: string;
-  cloudflareToken?: string;
 };
 
 const MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
-function resolveCfCreds(
-  req: Request,
-  input: NoteGenerateBody,
-): { id: string; token: string } {
-  const id =
-    input.cloudflareAccountId?.trim() ||
-    req.headers.get("x-cloudflare-account-id")?.trim() ||
-    (!isAuthConfigured()
-      ? process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || ""
-      : "");
-  const token =
-    input.cloudflareToken?.trim() ||
-    req.headers.get("x-cloudflare-token")?.trim() ||
-    (!isAuthConfigured()
-      ? process.env.CLOUDFLARE_API_TOKEN?.trim() || ""
-      : "");
-  return { id, token };
+/** Text AI always uses the shared site Cloudflare Workers AI credentials. */
+function resolveTextCfCreds(): { id: string; token: string } {
+  return {
+    id: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "",
+    token: process.env.CLOUDFLARE_API_TOKEN?.trim() || "",
+  };
 }
 
 function cleanMaterials(list: string[]): string[] {
@@ -65,15 +51,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { id, token } = resolveCfCreds(req, input);
+  const { id, token } = resolveTextCfCreds();
   if (!id || !token) {
     return NextResponse.json(
       {
-        error: isAuthConfigured()
-          ? "缺少你自己的 Cloudflare Key：请在生成页配置 Account ID 与 API Token（登录后会同步到账号）。"
-          : "缺少 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN。本地写在 .env.local，或在生成页填写个人 Key。",
+        error:
+          "服务端未配置文生模型（缺少 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN）",
       },
-      { status: 400 },
+      { status: 503 },
     );
   }
 

@@ -6,7 +6,8 @@
 
 - **随便逛**：人设 / 日历 / 感悟 / 对话均可直接点，不强制登录。
 - **点「生成」**：才弹出登录 / 注册（保护额度，并开启云端同步）。
-- **每人自己的 Key**：生图 / Workers AI 文案用你自己的 Cloudflare（或备选线路）Key；登录后同步到账号，跨设备可用，**不占用别人额度**。
+- **生文**：用站点共用的 Cloudflare Workers AI（服务端 `CLOUDFLARE_*`），用户不用配 Key。
+- **生图**：每人自备 Cloudflare / 硅基流动等 Key；登录后同步到账号，**不占用别人额度**。
 
 ## 每次怎么打开
 
@@ -38,18 +39,18 @@ npm run dev -- --port 43123 --hostname 127.0.0.1
    - 创建项目 → Settings → API，复制 Project URL 与 `anon` key
    - SQL Editor 执行仓库里的 [`supabase/schema.sql`](supabase/schema.sql)（含 `planner_state` 与 `user_cover_keys`）
    - Authentication → Providers → Email：建议关掉 **Confirm email**（个人用更省事）
-   - 把 `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` 写入 `.env.local` 与 Vercel 环境变量
+   - 把 `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` 写入 `.env.local` 与 Netlify 环境变量
 
-2. **Vercel 免费托管**
+2. **Netlify 免费托管**
    - 导入本仓库 → 填同上环境变量 → Deploy
    - 得到公网链接；未登录可浏览，点「生成」需注册
 
-3. **每人自备生图 / 文案 Key**
-   - 默认推荐 [Cloudflare Workers AI](https://dash.cloudflare.com/?to=/:account/ai/workers-ai)（约 1 万 Neurons/天）
-   - 注册弹窗或生成页填写 Account ID + API Token；登录后写入 Supabase，换手机也能用
-   - 站点**不会**用共享服务端 Key 代付生图额度；本地未开登录时，可把 `CLOUDFLARE_*` 写在 `.env.local` 仅供自己调试文案接口
+3. **文生 vs 生图 Key**
+   - 文案 / 周选题：在 Netlify / `.env.local` 配置站点共用的 `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`
+   - 生图：每人自备 Key（推荐 [Cloudflare Workers AI](https://dash.cloudflare.com/?to=/:account/ai/workers-ai)，约 1 万 Neurons/天）；注册弹窗或生成页填写，登录后写入 Supabase
+   - 站点**不会**用共享服务端 Key 代付生图额度
 
-登录后：规划数据与 Key 都会同步到 Supabase。仍建议偶尔「导出备份」。
+登录后：规划数据与生图 Key 都会同步到 Supabase。
 
 ## 发文节奏
 

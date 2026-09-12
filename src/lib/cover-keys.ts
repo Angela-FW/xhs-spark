@@ -68,15 +68,6 @@ export function hasUsableCoverKeys(keys: StoredCoverKeys = loadCoverKeys()): boo
   return Boolean(keys.pollinationsKey?.trim());
 }
 
-/** True when Cloudflare Account ID + Token are present (for text AI too). */
-export function hasCloudflareTextKeys(
-  keys: StoredCoverKeys = loadCoverKeys(),
-): boolean {
-  return Boolean(
-    keys.cloudflareAccountId?.trim() && keys.cloudflareToken?.trim(),
-  );
-}
-
 /** Only the signed-in user's own keys — no shared site quota. */
 export function canGenerateAiCover(
   keys: StoredCoverKeys = loadCoverKeys(),
