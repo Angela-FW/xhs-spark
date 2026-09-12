@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { CoverKeysForm } from "@/components/cover-keys-form";
 import { Button } from "@/components/ui/button";
 import { hasUsableCoverKeys, type StoredCoverKeys } from "@/lib/cover-keys";
@@ -13,10 +14,11 @@ type Props = {
 
 export function CoverKeysModal({ open, onClose, onConfigured }: Props) {
   if (!open) return null;
+  if (typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-4 sm:items-center"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/35 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="cover-keys-title"
@@ -53,6 +55,7 @@ export function CoverKeysModal({ open, onClose, onConfigured }: Props) {
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -70,6 +70,8 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const [keysReady, setKeysReady] = useState(() => hasUsableCoverKeys());
   const bodyRef = useRef<HTMLDivElement>(null);
   const bodyReqId = useRef(0);
+  const requireAuthRef = useRef(requireAuth);
+  requireAuthRef.current = requireAuth;
 
   useEffect(() => {
     const sync = () => setKeysReady(canGenerateAiCover(loadCoverKeys()));
@@ -87,8 +89,10 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
     setBodyHint(null);
     setJustGenerated(false);
     setBodyBusy(false);
-    bodyReqId.current += 1;
-    if (post?.draft?.titles?.length) {
+    const reqId = ++bodyReqId.current;
+
+    const hasSavedBody = Boolean(post?.draft?.titles?.length && post.draft.body?.trim());
+    if (hasSavedBody && post?.draft) {
       setNote({
         titles: post.draft.titles,
         body: post.draft.body,
@@ -99,17 +103,70 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       setTitleIndex(post.draft.titleIndex ?? 0);
       setDraftExtra(post.draft.extra ?? "");
       setCoverPrompt("");
-    } else if (post) {
-      setNote(generateNoteFromPost(post, state.persona, ""));
-      setTitleIndex(0);
-      setDraftExtra("");
-      setCoverPrompt("");
-    } else {
+      return;
+    }
+
+    if (!post) {
       setNote(null);
       setTitleIndex(0);
       setDraftExtra("");
       setCoverPrompt("");
+      return;
     }
+
+    const shell = generateNoteFromPost(post, state.persona, post.draft?.extra ?? "");
+    const keepTitles =
+      post.draft?.titles?.length ? post.draft.titles : shell.titles;
+    setNote({ ...shell, titles: keepTitles, body: "" });
+    setTitleIndex(post.draft?.titleIndex ?? 0);
+    setDraftExtra(post.draft?.extra ?? "");
+    setCoverPrompt("");
+    setBodyBusy(true);
+    setBodyHint("正在用模型生成正文…");
+
+    const title =
+      keepTitles[post.draft?.titleIndex ?? 0] ?? keepTitles[0] ?? post.titleHint;
+    const persona = state.persona;
+    const extra = post.draft?.extra ?? "";
+    const postRef = post;
+
+    void (async () => {
+      if (!(await requireAuthRef.current())) {
+        if (reqId !== bodyReqId.current) return;
+        setNote({ ...shell, titles: keepTitles });
+        setBodyBusy(false);
+        setBodyHint("未登录，暂用本地草稿；登录后可点「生成正文」用模型重写");
+        return;
+      }
+      try {
+        const { note: next, result } = await generateNoteBodyForPost(
+          postRef,
+          persona,
+          extra,
+          title,
+          0,
+          keepTitles,
+        );
+        if (reqId !== bodyReqId.current) return;
+        setNote(next);
+        setJustGenerated(true);
+        if (result.source === "ai") {
+          setBodyHint(
+            result.attempts > 1
+              ? `已用模型生成（第 ${result.attempts} 次成功）`
+              : "已用模型生成",
+          );
+        } else {
+          setBodyHint(
+            `模型连续 ${result.attempts} 次失败，已改用本地模板${
+              result.error ? `：${result.error}` : ""
+            }`,
+          );
+        }
+      } finally {
+        if (reqId === bodyReqId.current) setBodyBusy(false);
+      }
+    })();
   }, [post?.id, state.persona]);
 
   useEffect(() => {
@@ -476,10 +533,15 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
             已按当前标题重写正文（含你的补充）
           </p>
         ) : null}
-        <pre className="whitespace-pre-wrap rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink)]">
-          {note.body}
-        </pre>
-        <div className="mt-3 flex flex-wrap gap-2">
+        {bodyBusy && !note.body ? (
+          <div className="rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink-soft)]">
+            模型正在写正文，稍等几秒…
+          </div>
+        ) : (
+          <pre className="whitespace-pre-wrap rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink)]">
+            {note.body}
+          </pre>
+        )}        <div className="mt-3 flex flex-wrap gap-2">
           {note.tags.map((tag) => (
             <span
               key={tag}
