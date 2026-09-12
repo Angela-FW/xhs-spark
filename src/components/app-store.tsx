@@ -14,6 +14,7 @@ import {
   type FeedbackEntry,
   type InsightCard,
   type PendingCalibration,
+  activateWorkspace,
   attachMaterial,
   createInitialState,
   deleteSavedPersona,
@@ -27,12 +28,13 @@ import {
   saveState,
   selectSavedPersona,
   setPostPublishStatus,
+  startFromPreset,
   updatePersonaFields,
   upsertSavedPersona,
 } from "@/lib/store";
 import { applyPending, proposeFromFeedback, undoLastSnapshot } from "@/lib/calibrate";
 import type { CreatorPersona } from "@/lib/persona";
-import { getPreset, type PresetId } from "@/lib/persona";
+import { MAX_SAVED_PERSONAS, type PresetId } from "@/lib/persona";
 
 type StoreApi = {
   state: AppState;
@@ -63,6 +65,7 @@ type StoreApi = {
   updatePersona: (persona: CreatorPersona) => void;
   applyPersonaAndRebuild: (persona: CreatorPersona) => void;
   applySystemPreset: (id: PresetId) => void;
+  startLaunchPreset: (id: PresetId) => void;
   savePersonaToList: (
     persona?: CreatorPersona,
     label?: string,
@@ -226,13 +229,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const applySystemPreset = useCallback((id: PresetId) => {
-    const next = getPreset(id);
-    setState((s) =>
-      rebuildCalendarFromPersona(
-        { ...s, activeSavedPersonaId: null },
-        next,
-      ),
-    );
+    setState((s) => {
+      const existing = s.workspaces.find((w) => w.persona.presetId === id);
+      if (existing) return activateWorkspace(s, existing.id);
+      return startFromPreset(s, id);
+    });
+  }, []);
+
+  const startLaunchPreset = useCallback((id: PresetId) => {
+    setState((s) => {
+      if (s.workspaces.length >= MAX_SAVED_PERSONAS) {
+        alert(`人设最多 ${MAX_SAVED_PERSONAS} 个，请先删除一个再新建`);
+        return s;
+      }
+      return startFromPreset(s, id);
+    });
   }, []);
 
   const savePersonaToList = useCallback(
@@ -240,7 +251,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       let savedId: string | null = null;
       setState((s) => {
         const result = upsertSavedPersona(s, persona ?? s.persona, {
-          id: s.activeSavedPersonaId,
+          id: s.activeWorkspaceId,
           label: label || persona?.name,
         });
         if (result.error) {
@@ -260,7 +271,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       let savedId: string | null = null;
       setState((s) => {
         const result = upsertSavedPersona(s, persona, {
-          id: s.activeSavedPersonaId,
+          id: s.activeWorkspaceId,
           label: label || persona.name,
         });
         if (result.error) {
@@ -284,13 +295,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startBlankCustom = useCallback(() => {
-    const blank = getPreset("custom");
-    setState((s) =>
-      rebuildCalendarFromPersona(
-        { ...s, activeSavedPersonaId: null },
-        blank,
-      ),
-    );
+    setState((s) => startFromPreset(s, "custom"));
   }, []);
 
   const generateMoreWeek = useCallback(() => {
@@ -325,6 +330,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updatePersona,
       applyPersonaAndRebuild,
       applySystemPreset,
+      startLaunchPreset,
       savePersonaToList,
       savePersonaToListAndRebuild,
       removeSavedPersona,
@@ -352,6 +358,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updatePersona,
       applyPersonaAndRebuild,
       applySystemPreset,
+      startLaunchPreset,
       savePersonaToList,
       savePersonaToListAndRebuild,
       removeSavedPersona,

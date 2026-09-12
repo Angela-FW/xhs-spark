@@ -19,6 +19,7 @@ import {
   saveCoverKeys,
 } from "@/lib/cover-keys";
 import { importState } from "@/lib/store";
+import { LAUNCH_PRESETS } from "@/lib/persona";
 
 const TABS = [
   { id: "persona", label: "人设" },
@@ -113,10 +114,15 @@ function CoverKeysSyncBridge() {
 function PlannerInner() {
   const [tab, setTab] = useState<TabId>("calendar");
   const [generateOpen, setGenerateOpen] = useState(false);
-  const { state, setSelectedPostId } = useAppStore();
+  const { state, setSelectedPostId, startLaunchPreset, pickSavedPersona } =
+    useAppStore();
   const { authEnabled, user, openAuth, signOut } = useAuth();
   const [mounted, setMounted] = useState(false);
   const persona = state.persona;
+  const needsOnboarding = !state.activeWorkspaceId;
+  const activeLabel =
+    state.workspaces.find((w) => w.id === state.activeWorkspaceId)?.label ||
+    persona.name;
 
   useEffect(() => {
     setMounted(true);
@@ -132,14 +138,6 @@ function PlannerInner() {
     setGenerateOpen(false);
   }
 
-  const heroFacts = [
-    persona.name || null,
-    persona.age ? `${persona.age}岁` : null,
-    persona.gender || null,
-    persona.background || null,
-    persona.stage || null,
-  ].filter(Boolean);
-
   return (
     <div className="relative">
       <CloudSyncBridge />
@@ -154,19 +152,30 @@ function PlannerInner() {
         >
           <p className="brand-mark text-4xl tracking-wide sm:text-5xl">重启笔记</p>
           <h1 className="font-display mt-3 text-xl text-[var(--ink)] sm:text-2xl">
-            文案 + 一年规划，边写边调整
+            小红书图文起号，按爆款路径涨粉
           </h1>
-          <p className="mt-3 max-w-4xl text-sm leading-relaxed text-[var(--ink-soft)] sm:text-base">
-            {heroFacts.join(" · ")}
-            {heroFacts.length ? "。" : ""}
-            从 {state.calendarStart} 起排内容阶段；面向
-            {persona.audience || "你的读者"}；
-            {persona.voice
-              ? `语气：${persona.voice.slice(0, 48)}${persona.voice.length > 48 ? "…" : ""}。`
-              : ""}
-            生成小红书文案与免费封面图，不生成视频。随便逛无需登录；点「生成」时再注册。
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ink-soft)] sm:text-base">
+            {needsOnboarding
+              ? "选一个意向人设吧，我来带你起号！"
+              : `当前人设「${activeLabel}」· 未来 4 周路线已排好，可往后翻继续规划。`}
           </p>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {!needsOnboarding && state.workspaces.length > 1 ? (
+              <label className="flex items-center gap-2 text-sm text-[var(--ink-soft)]">
+                <span>切换人设</span>
+                <select
+                  className="h-8 rounded-md border border-[var(--ink-soft)]/20 bg-white/80 px-2 text-[var(--ink)]"
+                  value={state.activeWorkspaceId ?? ""}
+                  onChange={(e) => pickSavedPersona(e.target.value)}
+                >
+                  {state.workspaces.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {authEnabled ? (
               user ? (
                 <Button
@@ -193,7 +202,37 @@ function PlannerInner() {
       </header>
 
       <div className="mx-auto w-full max-w-7xl px-[max(1rem,4vw)]">
-        {generateOpen ? (
+        {needsOnboarding ? (
+          <div className="pb-16">
+            <div className="studio-shell rounded-2xl p-5 sm:p-6">
+              <h2 className="font-display text-lg text-[var(--ink)]">
+                选一个起号方向
+              </h2>
+              <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                选定后会生成该人设未来 4 周的笔记路线，之后还能换人或新建。
+              </p>
+              <ul className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {LAUNCH_PRESETS.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        startLaunchPreset(p.id);
+                        setTab("calendar");
+                      }}
+                      className="h-full w-full rounded-2xl border border-[var(--ink-soft)]/15 bg-white/70 px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
+                    >
+                      <p className="font-medium text-[var(--ink)]">{p.label}</p>
+                      <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                        {p.blurb}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : generateOpen ? (
           <div className="pb-16">
             <GeneratePanel onClose={closeGenerate} />
           </div>

@@ -618,10 +618,6 @@ export function updatePersonaFields(
   };
 }
 
-function newSavedId() {
-  return `saved-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
 /** Save / update current persona into the active workspace (or create one). */
 export function upsertSavedPersona(
   state: AppState,
@@ -691,102 +687,187 @@ export function upsertSavedPersona(
   };
 }
 
-export function deleteSavedPersona(
-  state: AppState,
-  id: string,
-): AppState {
+export function deleteSavedPersona(state: AppState, id: string): AppState {
   return deleteWorkspace(state, id);
 }
 
-export function selectSavedPersona(
-  state: AppState,
-  id: string,
-): AppState {
+export function selectSavedPersona(state: AppState, id: string): AppState {
   return activateWorkspace(state, id);
 }
 
 function migrateParsed(
-  parsed: Omit<Partial<AppState>, "version"> & { version?: number },
+  parsed: Omit<Partial<AppState>, "version"> & { version?: number } & {
+    savedPersonas?: SavedPersonaSlot[];
+    activeSavedPersonaId?: string | null;
+  },
 ): AppState {
   const fallback = createInitialState();
-  const persona = normalizePersona(
-    (parsed as { persona?: Partial<CreatorPersona> }).persona ??
-      fallback.persona,
-  );
 
-  if (parsed.version === 3 && parsed.posts?.length) {
-    const savedRaw = Array.isArray(
-      (parsed as { savedPersonas?: SavedPersonaSlot[] }).savedPersonas,
-    )
-      ? (parsed as { savedPersonas: SavedPersonaSlot[] }).savedPersonas
-      : [];
-    const savedPersonas = savedRaw
+  if (parsed.version === 4 && Array.isArray(parsed.workspaces)) {
+    const workspaces = parsed.workspaces
       .slice(0, MAX_SAVED_PERSONAS)
-      .map((s) => ({
-        id: String(s.id || newSavedId()),
-        label: String(s.label || s.persona?.name || "未命名人设"),
-        persona: ensurePersonaTopicSeeds(normalizePersona(s.persona)),
-        updatedAt: String(s.updatedAt || new Date().toISOString()),
+      .map((w) => ({
+        ...w,
+        id: String(w.id || newWorkspaceId()),
+        label: String(w.label || w.persona?.name || "未命名人设"),
+        persona: ensurePersonaTopicSeeds(normalizePersona(w.persona)),
+        posts: Array.isArray(w.posts) ? w.posts : [],
+        weekMeta: Array.isArray(w.weekMeta) ? w.weekMeta : [],
+        insights: Array.isArray(w.insights) ? w.insights : [],
+        feedback: Array.isArray(w.feedback) ? w.feedback : [],
+        weights: { ...DEFAULT_WEIGHTS, ...(w.weights ?? {}) },
+        pending: w.pending ?? null,
+        snapshots: Array.isArray(w.snapshots) ? w.snapshots : [],
+        chat: Array.isArray(w.chat) ? w.chat : [],
+        selectedPostId: w.selectedPostId ?? null,
+        calendarStart: w.calendarStart || defaultCalendarStart(),
+        scheduleAsOf: w.scheduleAsOf || todayLocal(),
+        updatedAt: w.updatedAt || new Date().toISOString(),
       }));
+    const activeId =
+      parsed.activeWorkspaceId &&
+      workspaces.some((w) => w.id === parsed.activeWorkspaceId)
+        ? parsed.activeWorkspaceId
+        : workspaces[0]?.id ?? null;
+    if (!activeId) return fallback;
+    const active = workspaces.find((w) => w.id === activeId)!;
     return {
-      ...fallback,
-      ...parsed,
-      version: 3,
-      persona: ensurePersonaTopicSeeds(persona),
-      savedPersonas,
-      activeSavedPersonaId:
-        (parsed as { activeSavedPersonaId?: string | null })
-          .activeSavedPersonaId ?? null,
-      calendarStart: parsed.calendarStart || fallback.calendarStart,
-      scheduleAsOf:
-        (parsed as { scheduleAsOf?: string }).scheduleAsOf ||
-        parsed.calendarStart ||
-        fallback.scheduleAsOf,
-      posts: parsed.posts.map((p) => ({
-        ...p,
-        publishedAt:
-          p.status === "published"
-            ? p.publishedAt || undefined
-            : undefined,
-      })),
-      weekMeta: parsed.weekMeta?.length ? parsed.weekMeta : fallback.weekMeta,
-      insights: parsed.insights ?? [],
-      feedback: parsed.feedback ?? [],
-      weights: { ...fallback.weights, ...(parsed.weights ?? {}) },
-      pending: parsed.pending ?? null,
-      snapshots: parsed.snapshots ?? [],
-      chat: parsed.chat?.length ? parsed.chat : fallback.chat,
-      selectedPostId: parsed.selectedPostId ?? fallback.selectedPostId,
+      version: 4,
+      activeWorkspaceId: activeId,
+      workspaces,
+      ...mirrorFromWorkspace(active),
     };
   }
 
-  // v2 or broken: rebuild calendar with persona, keep soft data
+  const persona = ensurePersonaTopicSeeds(
+    normalizePersona(
+      (parsed as { persona?: Partial<CreatorPersona> }).persona ??
+        fallback.persona,
+    ),
+  );
+
+  if (parsed.version === 3 && parsed.posts?.length) {
+    const primaryId = newWorkspaceId();
+    const primary: PersonaWorkspace = {
+      id: primaryId,
+      label: persona.name || "当前人设",
+      persona,
+      updatedAt: new Date().toISOString(),
+      calendarStart: parsed.calendarStart || defaultCalendarStart(),
+      scheduleAsOf:
+        parsed.scheduleAsOf || parsed.calendarStart || todayLocal(),
+      posts: parsed.posts.map((p) => ({
+        ...p,
+        publishedAt:
+          p.status === "published" ? p.publishedAt || undefined : undefined,
+      })),
+      weekMeta: parsed.weekMeta?.length ? parsed.weekMeta : [],
+      insights: parsed.insights ?? [],
+      selectedPostId: parsed.selectedPostId ?? parsed.posts[0]?.id ?? null,
+      feedback: parsed.feedback ?? [],
+      weights: { ...DEFAULT_WEIGHTS, ...(parsed.weights ?? {}) },
+      pending: parsed.pending ?? null,
+      snapshots: parsed.snapshots ?? [],
+      chat: parsed.chat?.length ? parsed.chat : [welcomeChat(persona)],
+    };
+
+    const extras: PersonaWorkspace[] = (parsed.savedPersonas || [])
+      .filter((s) => s.id !== parsed.activeSavedPersonaId)
+      .slice(0, MAX_SAVED_PERSONAS - 1)
+      .map((s) => {
+        const p = ensurePersonaTopicSeeds(normalizePersona(s.persona));
+        const cal = buildYearCalendar(
+          defaultCalendarStart(),
+          p,
+          INITIAL_PLAN_WEEKS,
+        );
+        return {
+          id: String(s.id || newWorkspaceId()),
+          label: String(s.label || p.name || "未命名人设"),
+          persona: p,
+          updatedAt: String(s.updatedAt || new Date().toISOString()),
+          calendarStart: cal.startDate,
+          scheduleAsOf: todayLocal(),
+          posts: cal.posts,
+          weekMeta: cal.weeks.map((w) => ({
+            week: w.week,
+            postsPerWeek: w.postsPerWeek,
+          })),
+          insights: [],
+          selectedPostId: cal.posts[0]?.id ?? null,
+          feedback: [],
+          weights: { ...DEFAULT_WEIGHTS },
+          pending: null,
+          snapshots: [],
+          chat: [welcomeChat(p)],
+        };
+      });
+
+    const workspaces = [primary, ...extras].slice(0, MAX_SAVED_PERSONAS);
+    return {
+      version: 4,
+      activeWorkspaceId: primaryId,
+      workspaces,
+      ...mirrorFromWorkspace(primary),
+    };
+  }
+
   if (parsed.posts?.length && parsed.version === 2) {
     const soft: AppState = {
       ...fallback,
       persona,
       insights: parsed.insights ?? [],
       feedback: parsed.feedback ?? [],
-      chat: parsed.chat?.length ? parsed.chat : fallback.chat,
+      chat: parsed.chat?.length ? parsed.chat : [welcomeChat(persona)],
       weights: { ...fallback.weights, ...(parsed.weights as PillarWeights) },
       snapshots: parsed.snapshots ?? [],
       pending: null,
       calendarStart: parsed.calendarStart || fallback.calendarStart,
       selectedPostId: parsed.selectedPostId ?? fallback.selectedPostId,
     };
-    return rebuildFullCalendarFromPersona(soft, persona, soft.calendarStart);
+    const rebuilt = rebuildFullCalendarFromPersona(
+      soft,
+      persona,
+      soft.calendarStart,
+    );
+    const id = newWorkspaceId();
+    const ws = workspaceFromMirror(rebuilt, id, persona.name);
+    return {
+      ...rebuilt,
+      version: 4,
+      activeWorkspaceId: id,
+      workspaces: [ws],
+    };
   }
 
-  return {
-    ...fallback,
-    persona,
-    insights: parsed.insights ?? [],
-    feedback: parsed.feedback ?? [],
-    chat: parsed.chat?.length ? parsed.chat : fallback.chat,
-    snapshots: [],
-    pending: null,
-    weights: { ...fallback.weights, ...(parsed.weights as PillarWeights) },
-  };
+  if (parsed.posts?.length) {
+    const id = newWorkspaceId();
+    const ws: PersonaWorkspace = {
+      id,
+      label: persona.name || "当前人设",
+      persona,
+      updatedAt: new Date().toISOString(),
+      calendarStart: parsed.calendarStart || defaultCalendarStart(),
+      scheduleAsOf: parsed.scheduleAsOf || todayLocal(),
+      posts: parsed.posts,
+      weekMeta: parsed.weekMeta ?? [],
+      insights: parsed.insights ?? [],
+      selectedPostId: parsed.selectedPostId ?? parsed.posts[0]?.id ?? null,
+      feedback: parsed.feedback ?? [],
+      weights: { ...DEFAULT_WEIGHTS, ...(parsed.weights ?? {}) },
+      pending: parsed.pending ?? null,
+      snapshots: parsed.snapshots ?? [],
+      chat: parsed.chat?.length ? parsed.chat : [welcomeChat(persona)],
+    };
+    return {
+      version: 4,
+      activeWorkspaceId: id,
+      workspaces: [ws],
+      ...mirrorFromWorkspace(ws),
+    };
+  }
+
+  return fallback;
 }
 
 export function loadState(): AppState {

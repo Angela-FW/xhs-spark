@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/app-store";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
+  LAUNCH_PRESETS,
   MAX_SAVED_PERSONAS,
-  PERSONA_PRESETS,
   applyEditableFields,
   clonePersona,
   editableFieldsFromPersona,
@@ -19,10 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 
 type Fields = ReturnType<typeof editableFieldsFromPersona>;
 
-const SYSTEM_PRESETS = PERSONA_PRESETS.filter((p) => p.id !== "custom");
-
 const REBUILD_HINT =
-  "会清空其他周的「待写」选题，只保留已起草/已发布，并新生成未来一周。确定继续？";
+  "会清空其他周的「待写」选题，只保留已起草/已发布，并重新生成未来四周。确定继续？";
 
 type PendingAction =
   | { kind: "system"; id: PresetId }
@@ -66,9 +64,13 @@ export function PersonaPanel() {
     return applyEditableFields(base, fields);
   }
 
-  const activeSaved = state.activeSavedPersonaId;
-  const systemActive =
-    !activeSaved && SYSTEM_PRESETS.some((p) => p.id === draft.presetId);
+  const activeSaved = state.activeWorkspaceId;
+  const systemActive = Boolean(
+    activeSaved &&
+      LAUNCH_PRESETS.some((p) => p.id === draft.presetId) &&
+      state.workspaces.find((w) => w.id === activeSaved)?.persona.presetId ===
+        draft.presetId,
+  );
 
   function buildCustomPersona(): CreatorPersona {
     return {
@@ -78,19 +80,19 @@ export function PersonaPanel() {
   }
 
   function runSaveAndRebuild() {
-    if (state.activeSavedPersonaId || draft.presetId === "custom") {
+    if (state.activeWorkspaceId || draft.presetId === "custom") {
       const next = buildCustomPersona();
       setDraft(next);
       const id = savePersonaToListAndRebuild(next, next.name);
       if (id) {
-        setSavedHint(`已保存「${next.name}」，并重算了未来最近一周的待写选题`);
+        setSavedHint(`已保存「${next.name}」，并重算了未来四周的待写选题`);
       }
       return;
     }
     const next = buildFromFields();
     setDraft(next);
     applyPersonaAndRebuild(next);
-    setSavedHint("已保存，并重算了未来最近一周的待写选题");
+    setSavedHint("已保存，并重算了未来四周的待写选题");
   }
 
   function onConfirmPending() {
@@ -100,18 +102,18 @@ export function PersonaPanel() {
     if (action.kind === "system") {
       applySystemPreset(action.id);
       setSavedHint(
-        "已切换系统预设：页头、阶段标签已同步，并重算了未来最近一周的待写选题",
+        "已切换起号方向：页头、阶段标签已同步，笔记保存在对应人设下",
       );
       return;
     }
     if (action.kind === "saved") {
       pickSavedPersona(action.id);
-      setSavedHint("已切换自定义人设，并重算了未来最近一周的待写选题");
+      setSavedHint("已切换人设，笔记与日历已切换到该人设");
       return;
     }
     if (action.kind === "blank") {
       startBlankCustom();
-      setSavedHint("已打开空白自定义人设，填完后点「保存」加入列表");
+      setSavedHint("已新建自定义人设，填完后点「保存」");
       return;
     }
     if (action.kind === "rebuild") {
@@ -137,26 +139,21 @@ export function PersonaPanel() {
     setPending({ kind: "blank" });
   }
 
-  /** 已有人设 → 更新；新建自定义 → 新增；系统预设 → 只更新当前使用 */
+  /** 已有人设 → 更新；新建自定义 → 新增 */
   function onSave() {
-    if (state.activeSavedPersonaId || draft.presetId === "custom") {
+    if (state.activeWorkspaceId || draft.presetId === "custom") {
       const next = buildCustomPersona();
       setDraft(next);
       const id = savePersonaToList(next, next.name);
       if (id) {
-        const isUpdate = Boolean(state.activeSavedPersonaId);
-        setSavedHint(
-          isUpdate
-            ? `已更新人设「${next.name}」`
-            : `已新增人设「${next.name}」`,
-        );
+        setSavedHint(`已保存人设「${next.name}」`);
       }
       return;
     }
     const next = buildFromFields();
     setDraft(next);
     updatePersona(next);
-    setSavedHint("已保存当前系统预设的修改（未写入自定义列表）");
+    setSavedHint("已保存当前人设修改");
   }
 
   function onSaveAndRebuild() {
@@ -179,13 +176,16 @@ export function PersonaPanel() {
         ? {
             title:
               pending.kind === "system"
-                ? "切换系统预设"
+                ? "切换起号方向"
                 : pending.kind === "saved"
-                  ? "切换自定义人设"
+                  ? "切换人设"
                   : pending.kind === "blank"
-                    ? "新建空白自定义人设"
+                    ? "新建自定义人设"
                     : "保存并重算选题",
-            message: REBUILD_HINT,
+            message:
+              pending.kind === "saved" || pending.kind === "system"
+                ? "将打开该人设的独立笔记库；若还没有这个方向，会新建未来四周路线。其他人设内容不会丢。"
+                : REBUILD_HINT,
             confirmLabel: "确定继续",
             danger: false,
           }
@@ -205,13 +205,13 @@ export function PersonaPanel() {
       <div className="studio-shell rounded-2xl p-5">
         <h3 className="font-display text-lg text-[var(--ink)]">创作者人设</h3>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          系统预设可一键切换；自定义人设保存后会出现在下方列表（最多{" "}
-          {MAX_SAVED_PERSONAS} 个）。
+          每人设有独立笔记库。可切换起号方向或新建（最多 {MAX_SAVED_PERSONAS}{" "}
+          个）。
         </p>
 
-        <p className="mt-4 text-xs font-medium text-[var(--ink-soft)]">系统预设</p>
+        <p className="mt-4 text-xs font-medium text-[var(--ink-soft)]">起号方向</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          {SYSTEM_PRESETS.map((p) => (
+          {LAUNCH_PRESETS.map((p) => (
             <Button
               key={p.id}
               type="button"
@@ -245,15 +245,15 @@ export function PersonaPanel() {
         </div>
 
         <p className="mt-4 text-xs font-medium text-[var(--ink-soft)]">
-          我的人设（{state.savedPersonas.length}/{MAX_SAVED_PERSONAS}）
+          我的人设（{state.workspaces.length}/{MAX_SAVED_PERSONAS}）
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
-          {state.savedPersonas.length === 0 ? (
+          {state.workspaces.length === 0 ? (
             <p className="text-xs text-[var(--ink-soft)]">
-              还没有自定义人设。编辑下方字段后点「保存到人设列表」。
+              还没有人设。回首页选一个起号方向，或点「新建自定义」。
             </p>
           ) : (
-            state.savedPersonas.map((s) => (
+            state.workspaces.map((s) => (
               <div key={s.id} className="flex items-center gap-1">
                 <Button
                   type="button"
@@ -282,10 +282,10 @@ export function PersonaPanel() {
         </div>
         <p className="mt-2 text-xs text-[var(--ink-soft)]">
           {activeSaved
-            ? `当前：自定义「${state.savedPersonas.find((s) => s.id === activeSaved)?.label ?? ""}」`
-            : SYSTEM_PRESETS.find((p) => p.id === draft.presetId)?.blurb ||
+            ? `当前：「${state.workspaces.find((s) => s.id === activeSaved)?.label ?? ""}」`
+            : LAUNCH_PRESETS.find((p) => p.id === draft.presetId)?.blurb ||
               (draft.presetId === "custom"
-                ? "空白自定义：填写后保存到人设列表"
+                ? "空白自定义：填写后保存"
                 : "")}
         </p>
       </div>

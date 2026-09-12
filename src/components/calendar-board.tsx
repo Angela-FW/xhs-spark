@@ -96,7 +96,7 @@ export function CalendarBoard({
       </div>
 
       <p className="text-sm text-[var(--ink-soft)]">
-        起点 {state.calendarStart} · 未发布笔记按天自动顺延 · 点「生成」打开文案页，返回时自动保存
+        未来 4 周起号路径 · 未发布笔记按天自动顺延 · 点「生成」打开文案页 · 可往后翻继续规划
       </p>
 
       <div className="space-y-5">
@@ -217,7 +217,7 @@ export function CalendarBoard({
                     variant="outline"
                     onClick={() => generateMoreWeek()}
                   >
-                    生成更多
+                    生成下一周
                   </Button>
                 </div>
               ) : null}
@@ -236,7 +236,7 @@ export function CalendarBoard({
               variant="outline"
               onClick={() => generateMoreWeek()}
             >
-              生成更多
+              生成下一周
             </Button>
           </div>
         ) : null}
