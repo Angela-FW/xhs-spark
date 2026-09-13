@@ -10,8 +10,10 @@ import {
 import {
   DEFAULT_PERSONA,
   MAX_SAVED_PERSONAS,
+  MAX_CUSTOM_PERSONAS,
   PERSONA_PRESETS,
   clonePersona,
+  customPersonaCount,
   defaultCalendarStart,
   ensurePersonaTopicSeeds,
   getPreset,
@@ -250,6 +252,12 @@ export function createInitialState(): AppState {
 export function startFromPreset(state: AppState, presetId: PresetId): AppState {
   const flushed = syncActiveWorkspace(state);
   if (flushed.workspaces.length >= MAX_SAVED_PERSONAS) {
+    return flushed;
+  }
+  if (
+    presetId === "custom" &&
+    customPersonaCount(flushed.workspaces) >= MAX_CUSTOM_PERSONAS
+  ) {
     return flushed;
   }
   const persona = ensurePersonaTopicSeeds(getPreset(presetId));
@@ -659,6 +667,15 @@ export function upsertSavedPersona(
     return {
       state: flushed,
       error: `人设最多 ${MAX_SAVED_PERSONAS} 个，请先删除一个再保存`,
+    };
+  }
+  if (
+    ready.presetId === "custom" &&
+    customPersonaCount(flushed.workspaces) >= MAX_CUSTOM_PERSONAS
+  ) {
+    return {
+      state: flushed,
+      error: `自定义人设最多 ${MAX_CUSTOM_PERSONAS} 个，请先删除一个再新建`,
     };
   }
 

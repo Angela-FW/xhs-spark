@@ -40,7 +40,9 @@ function hashSeed(input: string): number {
 }
 
 function pick<T>(list: T[], offset: number): T {
-  return list[offset % list.length];
+  const n = list.length;
+  const i = ((offset % n) + n) % n;
+  return list[i];
 }
 
 export function generateTitleCandidates(
@@ -51,7 +53,14 @@ export function generateTitleCandidates(
 ): string[] {
   const baseSeed = hashSeed(`${post.id}:${post.titleHint}:${seed}`);
   const opener = pick(TITLE_OPENERS, baseSeed);
-  const ending = pick(TITLE_ENDINGS, baseSeed >> 3);
+  const opener2 = pick(TITLE_OPENERS, baseSeed >>> 2);
+  const ending = pick(TITLE_ENDINGS, baseSeed >>> 3);
+  const ending2 = pick(TITLE_ENDINGS, baseSeed >>> 5);
+  const hook0 = pick(post.hooks.length ? post.hooks : ["真实记录"], baseSeed >>> 1);
+  const hook1 = pick(
+    post.hooks.length > 1 ? post.hooks : ["可以落地"],
+    baseSeed >>> 4,
+  );
   const formatWord =
     post.format === "tips" ? "干货" : post.format === "emotion" ? "真心话" : "记录";
   const core = post.titleHint.replace(/^.*?｜/, "").slice(0, 18);
@@ -64,19 +73,25 @@ export function generateTitleCandidates(
       : persona.contentMix === "career"
         ? "写给同样在职场里找节奏的人"
         : "写给同样在找工作的人";
+  const angleBit = (post.angle ?? "").slice(0, 16);
   const fallbackTitles = [
     `${opener}｜${core || post.titleHint}`,
-    `${pillarLabel(post.pillar)}｜${post.hooks[0] ?? "真实记录"}`,
+    `${pillarLabel(post.pillar)}｜${hook0}`,
     ageBg
-      ? `${ageBg}｜${post.angle.slice(0, 16)}`
-      : `${persona.name}｜${post.angle.slice(0, 16)}`,
-    `${formatWord}｜${post.hooks[1] ?? ending}`,
-    `${audienceHint}｜${ending}`,
+      ? `${ageBg}｜${opener2.slice(0, 8)}${angleBit ? `·${angleBit}` : ""}`
+      : `${persona.name}｜${opener2}·${angleBit}`,
+    `${formatWord}｜${hook1}·${ending}`,
+    `${audienceHint}｜${ending2}`,
   ];
 
+  // Deduplicate while preserving order; regenerate path should not pin.
+  const unique = fallbackTitles.filter(
+    (t, i, arr) => t.trim() && arr.indexOf(t) === i,
+  );
+
   const pinned = selectedTitle?.trim();
-  if (!pinned) return fallbackTitles;
-  return [pinned, ...fallbackTitles.filter((t) => t !== pinned)].slice(0, 5);
+  if (!pinned) return unique.slice(0, 5);
+  return [pinned, ...unique.filter((t) => t !== pinned)].slice(0, 5);
 }
 
 function materialBits(post: CalendarPost, extraNote: string): string[] {

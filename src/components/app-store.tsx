@@ -36,7 +36,7 @@ import {
 } from "@/lib/store";
 import { applyPending, proposeFromFeedback, undoLastSnapshot } from "@/lib/calibrate";
 import type { CreatorPersona } from "@/lib/persona";
-import { MAX_SAVED_PERSONAS, type PresetId } from "@/lib/persona";
+import { MAX_SAVED_PERSONAS, MAX_CUSTOM_PERSONAS, customPersonaCount, type PresetId } from "@/lib/persona";
 
 type StoreApi = {
   state: AppState;
@@ -339,7 +339,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startBlankCustom = useCallback(() => {
-    setState((s) => startFromPreset(s, "custom"));
+    setState((s) => {
+      if (customPersonaCount(s.workspaces) >= MAX_CUSTOM_PERSONAS) {
+        alert(`自定义人设最多 ${MAX_CUSTOM_PERSONAS} 个，请先删除一个再新建`);
+        return s;
+      }
+      if (s.workspaces.length >= MAX_SAVED_PERSONAS) {
+        alert(`人设最多 ${MAX_SAVED_PERSONAS} 个，请先删除一个再新建`);
+        return s;
+      }
+      return startFromPreset(s, "custom");
+    });
   }, []);
 
   const generateMoreWeek = useCallback(() => {

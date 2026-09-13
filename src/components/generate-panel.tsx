@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 function CopyBtn({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -68,6 +69,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const [keysModalOpen, setKeysModalOpen] = useState(false);
   const [pendingCoverSeed, setPendingCoverSeed] = useState<number | null>(null);
   const [keysReady, setKeysReady] = useState(() => hasUsableCoverKeys());
+  const [confirmPublish, setConfirmPublish] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const bodyReqId = useRef(0);
   const requireAuthRef = useRef(requireAuth);
@@ -266,12 +268,9 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       const nextSeed = prevSeed + 1;
       setNote((prev) => {
         if (!prev) return prev;
-        const titles = generateTitleCandidates(
-          post,
-          state.persona,
-          nextSeed,
-          selectedTitle,
-        );
+        // Do not pin the current title — otherwise #1 never changes and
+        // several template slots ignore seed, so only #2 appears to refresh.
+        const titles = generateTitleCandidates(post, state.persona, nextSeed);
         return { ...prev, titles };
       });
       setTitleIndex(0);
@@ -356,12 +355,12 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
         {onClose ? (
           <div className="studio-shell sticky top-2 z-20 -mt-2 flex items-center gap-3 rounded-2xl p-2">
             <Button type="button" size="sm" variant="outline" onClick={persistAndClose}>
-              ← 返回日历
+              ← 返回笔记日历
             </Button>
           </div>
         ) : null}
         <div className="empty-panel rounded-2xl px-6 py-12 text-center text-sm text-[var(--ink-soft)]">
-          先在「日历」里点选一篇笔记，再回来生成文案与封面图。
+          先在「笔记日历」里点选一篇笔记，再回来生成文案与封面图。
         </div>
       </div>
     );
@@ -401,14 +400,14 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
         </div>
       ) : null}
       <div className="studio-shell rounded-2xl p-5">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div>
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
             <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
             <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
               点选一条作为当前标题；也可直接改字。换标题或点「重新生成正文」都会按当前标题重写。
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button type="button" size="sm" variant="outline" onClick={regenerateTitles}>
               <RefreshCw className="size-3.5" />
               重新生成标题
@@ -463,24 +462,6 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
             </h3>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">{post.angle}</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setPostStatus(post.id, "drafted")}
-            >
-              标为已起草
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-              onClick={() => setPostStatus(post.id, "published")}
-            >
-              标为已发布（记下今天）
-            </Button>
-          </div>
         </div>
 
         {post.materials.length ? (
@@ -522,7 +503,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
 
       <div className="mb-3 flex items-center justify-between">
           <h4 className="font-display text-base text-[var(--ink)]">
-            正文（可直接复制发笔记）
+            正文
           </h4>
           <CopyBtn text={note.body} />
         </div>
@@ -602,10 +583,6 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
             className="min-h-32 bg-white"
             placeholder="可留空。留空时将根据当前标题和正文自动匹配生成封面…"
           />
-          <p className="text-xs text-[var(--ink-soft)]">
-            写「内容 / 风格 / 颜色」时，会按内容在封面上排版文字（中文可准确显示）。
-            纯画面描述则走 AI 生图。留空时按当前标题和正文自动生成。
-          </p>
         </div>
 
         <Button
@@ -643,6 +620,40 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
           )}
         </div>
       </div>
+
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={post.status === "published"}
+          onClick={() => setPostStatus(post.id, "drafted")}
+        >
+          标为已起草
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+          disabled={post.status === "published"}
+          onClick={() => setConfirmPublish(true)}
+        >
+          {post.status === "published" ? "已发布" : "标为已发布（记下今天）"}
+        </Button>
+      </div>
+
+      <ConfirmDialog
+        open={confirmPublish}
+        title="确认发布？"
+        message={"标记为已发布后，这篇笔记不能再编辑。\n确定现在发布吗？"}
+        confirmLabel="确认发布"
+        danger
+        onConfirm={() => {
+          setPostStatus(post.id, "published");
+          setConfirmPublish(false);
+        }}
+        onCancel={() => setConfirmPublish(false)}
+      />
     </div>
   );
 }

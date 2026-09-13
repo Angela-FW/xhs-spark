@@ -6,9 +6,10 @@ import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   LAUNCH_PRESETS,
-  MAX_SAVED_PERSONAS,
+  MAX_CUSTOM_PERSONAS,
   applyEditableFields,
   clonePersona,
+  customPersonaCount,
   editableFieldsFromPersona,
   type CreatorPersona,
   type PresetId,
@@ -33,7 +34,7 @@ type PendingAction =
   | { kind: "delete"; id: string; label: string }
   | { kind: "reset" };
 
-export function PersonaPanel() {
+export function PersonaPanel({ onDone }: { onDone?: () => void }) {
   const {
     state,
     updatePersona,
@@ -105,10 +106,7 @@ export function PersonaPanel() {
     setPending(null);
     if (action.kind === "system") {
       applySystemPreset(action.id);
-      return;
-    }
-    if (action.kind === "saved") {
-      pickSavedPersona(action.id);
+      onDone?.();
       return;
     }
     if (action.kind === "edit") {
@@ -138,19 +136,21 @@ export function PersonaPanel() {
 
   function onPickSystem(id: PresetId) {
     const existing = state.workspaces.find((w) => w.persona.presetId === id);
-    if (existing && existing.id === state.activeWorkspaceId) {
-      return;
-    }
     if (existing) {
-      setPending({ kind: "saved", id: existing.id });
+      if (existing.id !== state.activeWorkspaceId) {
+        pickSavedPersona(existing.id);
+      }
+      onDone?.();
       return;
     }
     setPending({ kind: "system", id });
   }
 
   function onPickSaved(id: string) {
-    if (state.activeWorkspaceId === id) return;
-    setPending({ kind: "saved", id });
+    if (state.activeWorkspaceId !== id) {
+      pickSavedPersona(id);
+    }
+    onDone?.();
   }
 
   function onEditSaved(id: string) {
@@ -162,8 +162,18 @@ export function PersonaPanel() {
   }
 
   function onStartBlank() {
+    if (customPersonaCount(state.workspaces) >= MAX_CUSTOM_PERSONAS) {
+      setSavedHint(`自定义人设最多 ${MAX_CUSTOM_PERSONAS} 个，请先删除一个再新建`);
+      return;
+    }
     setPending({ kind: "blank" });
   }
+
+  const availableLaunchPresets = LAUNCH_PRESETS.filter(
+    (p) => !state.workspaces.some((w) => w.persona.presetId === p.id),
+  );
+  const customCount = customPersonaCount(state.workspaces);
+  const customFull = customCount >= MAX_CUSTOM_PERSONAS;
 
   function onSave() {
     if (state.activeWorkspaceId || draft.presetId === "custom") {
@@ -200,13 +210,11 @@ export function PersonaPanel() {
             title:
               pending.kind === "system"
                 ? "选用起号方向"
-                : pending.kind === "saved"
-                  ? "切换人设"
-                  : pending.kind === "edit"
-                    ? "配置人设"
-                    : pending.kind === "blank"
-                      ? "新建自定义人设"
-                      : "保存并重算选题",
+                : pending.kind === "edit"
+                  ? "配置人设"
+                  : pending.kind === "blank"
+                    ? "新建自定义人设"
+                    : "保存并重算选题",
             message:
               pending.kind === "rebuild"
                 ? REBUILD_HINT
@@ -214,7 +222,7 @@ export function PersonaPanel() {
                   ? "将新建一套自定义人设，并进入填写页。"
                   : pending.kind === "edit"
                     ? "将切换到该人设并打开配置页。其他人设内容不会丢。"
-                    : "将切换到该人设的独立笔记库；若还没有这个方向，会新建未来四周路线。其他人设内容不会丢。",
+                    : "将新建该人设的独立笔记库，并生成未来四周路线。其他人设内容不会丢。",
             confirmLabel: "继续",
             danger: false,
           }
@@ -241,11 +249,14 @@ export function PersonaPanel() {
         <button
           type="button"
           onClick={onStartBlank}
-          className="studio-shell w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
+          disabled={customFull}
+          className="studio-shell w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--ink-soft)]/12 disabled:hover:bg-transparent"
         >
           <p className="font-medium text-[var(--ink)]">+ 自定义人设</p>
           <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
-            从空白开始填写，适合你自己的细分方向
+            {customFull
+              ? `最多 ${MAX_CUSTOM_PERSONAS} 个，请先删除一个再新建`
+              : `从空白开始填写，最多 ${MAX_CUSTOM_PERSONAS} 个`}
           </p>
         </button>
 
@@ -255,7 +266,7 @@ export function PersonaPanel() {
             {user
               ? "点人设可切换；点「设置」再改配置。登录后会同步到账号。"
               : "点人设可切换；点「设置」再改配置。未登录保存在本机，清缓存会丢。"}
-            最多 {MAX_SAVED_PERSONAS} 个。
+            自定义人设最多 {MAX_CUSTOM_PERSONAS} 个。
           </p>
         </div>
 
@@ -314,27 +325,29 @@ export function PersonaPanel() {
           </div>
         ) : null}
 
-        <div>
-          <p className="mb-2 text-xs font-medium text-[var(--ink-soft)]">
-            起号方向
-          </p>
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {LAUNCH_PRESETS.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => onPickSystem(p.id)}
-                  className="studio-shell h-full w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
-                >
-                  <p className="font-medium text-[var(--ink)]">{p.label}</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
-                    {p.blurb}
-                  </p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+        {availableLaunchPresets.length > 0 ? (
+          <div>
+            <p className="mb-2 text-xs font-medium text-[var(--ink-soft)]">
+              起号方向
+            </p>
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {availableLaunchPresets.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => onPickSystem(p.id)}
+                    className="studio-shell h-full w-full rounded-2xl px-4 py-4 text-left transition hover:border-[var(--coral)] hover:bg-[var(--coral)]/5"
+                  >
+                    <p className="font-medium text-[var(--ink)]">{p.label}</p>
+                    <p className="mt-1 text-xs leading-5 text-[var(--ink-soft)]">
+                      {p.blurb}
+                    </p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <button
           type="button"

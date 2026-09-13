@@ -17,7 +17,7 @@ import { AuthModal } from "@/components/auth-modal";
 
 /** Free generate clicks without login; the next one requires sign-in. */
 export const FREE_GENERATE_LIMIT = 9;
-const FREE_GEN_STORAGE_KEY = "restart-free-gen-count-v1";
+const FREE_GEN_STORAGE_KEY = "restart-free-gen-count-v2";
 
 function readFreeGenCount(): number {
   if (typeof window === "undefined") return 0;
@@ -109,6 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const requireAuth = useCallback((): Promise<boolean> => {
     if (!authEnabled) return Promise.resolve(true);
     if (session?.user) return Promise.resolve(true);
+    // Local `next dev`：不挡生成，方便继续测，不必先注册。
+    if (process.env.NODE_ENV !== "production") {
+      return Promise.resolve(true);
+    }
     const used = readFreeGenCount();
     if (used < FREE_GENERATE_LIMIT) {
       bumpFreeGenCount();

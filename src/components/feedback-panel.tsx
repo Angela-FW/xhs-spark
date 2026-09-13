@@ -40,7 +40,7 @@ export function FeedbackPanel() {
     e.preventDefault();
     const id = postId || publishedOrSelected[0]?.id;
     if (!id) {
-      setError("请先在日历里选一篇，或把某篇标为已发布");
+      setError("请先在笔记日历里选一篇，或把某篇标为已发布");
       return;
     }
     setError(null);

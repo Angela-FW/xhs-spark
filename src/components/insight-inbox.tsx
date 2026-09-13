@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
 import { processInsights, recommendPostsForInsight } from "@/lib/insights";
-import { pillarLabel } from "@/lib/persona";
+import { insightPlaceholderForPersona, pillarLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -34,9 +34,9 @@ export function InsightInbox() {
   return (
     <div className="space-y-5">
       <div className="studio-shell rounded-2xl p-5">
-        <h3 className="font-display text-lg text-[var(--ink)]">感悟收件箱</h3>
+        <h3 className="font-display text-lg text-[var(--ink)]">灵感收集箱</h3>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          不定期粘贴零散想法。我会拆条，按小红书爆款文风润色，并推荐到近期更相关的笔记。
+          不定期粘贴零散想法。我会帮你润色，并推荐到近期更相关的笔记。
         </p>
         <div className="mt-4 space-y-2">
           <Label htmlFor="insight-raw">近期感悟</Label>
@@ -44,7 +44,7 @@ export function InsightInbox() {
             id="insight-raw"
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
-            placeholder="例如：今天下午改简历改到烦，总觉得双非三个字像盖章……"
+            placeholder={insightPlaceholderForPersona(state.persona)}
             className="min-h-32 bg-white/80"
           />
         </div>
@@ -53,13 +53,15 @@ export function InsightInbox() {
             {error}
           </p>
         ) : null}
-        <Button
-          type="button"
-          className="mt-4 bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-          onClick={onProcess}
-        >
-          整理并入库
-        </Button>
+        <div className="mt-4 flex justify-end">
+          <Button
+            type="button"
+            className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+            onClick={onProcess}
+          >
+            整理并入库
+          </Button>
+        </div>
       </div>
 
       {!state.insights.length ? (

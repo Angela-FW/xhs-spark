@@ -32,10 +32,6 @@ export function CalendarBoard({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-[var(--ink-soft)]">
-        未来 4 周起号路径 · 未发布笔记按天自动顺延 · 点「生成」打开文案页 · 可往后翻继续规划
-      </p>
-
       <div className="space-y-5">
         {weeks.map(([week, posts]) => {
           const weekDate =
@@ -60,81 +56,90 @@ export function CalendarBoard({
                   .sort((a, b) => a.indexInWeek - b.indexInWeek)
                   .map((post) => {
                     const selected = state.selectedPostId === post.id;
+                    const statusLabel =
+                      post.status === "published"
+                        ? post.publishedAt
+                          ? `已发布 ${post.publishedAt}`
+                          : "已发布"
+                        : post.status === "drafted"
+                          ? "已起草"
+                          : "待写";
+                    const openNote = async () => {
+                      if (post.status !== "published" && !(await requireAuth())) {
+                        return;
+                      }
+                      onOpenGenerate(post.id);
+                    };
+                    const actionLabel =
+                      post.status === "published"
+                        ? "查看"
+                        : post.status === "drafted"
+                          ? "继续"
+                          : "生成";
+                    const actionClass =
+                      post.status === "published"
+                        ? ""
+                        : "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]";
                     return (
                       <li key={post.id}>
                         <div
-                          className={`rounded-xl border px-3 py-3 transition ${
+                          className={`rounded-xl border px-3 py-2.5 transition ${
                             selected
                               ? "border-[var(--coral)] bg-[var(--coral)]/8"
                               : "border-transparent bg-white/60 hover:border-[var(--ink-soft)]/15"
                           }`}
                         >
-                          <button
+                          <div className="flex items-start gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPostId(post.id)}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--coral)]">
+                                <span>{pillarLabel(post.pillar)}</span>
+                                <span className="text-[var(--ink-soft)]">
+                                  {post.format === "tips"
+                                    ? "干货"
+                                    : post.format === "emotion"
+                                      ? "情绪"
+                                      : "故事"}
+                                </span>
+                                <span className="text-[var(--ink-soft)]">
+                                  {statusLabel}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-sm font-medium text-[var(--ink)]">
+                                {post.titleHint}
+                              </p>
+                              <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-[var(--ink-soft)]">
+                                {post.angle}
+                                {post.materials.length
+                                  ? ` · 素材 ${post.materials.length}`
+                                  : ""}
+                              </p>
+                            </button>
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant={
+                                post.status === "published" ? "outline" : "default"
+                              }
+                              className={`mt-0.5 hidden shrink-0 rounded-[8px] sm:inline-flex ${actionClass}`}
+                              onClick={() => void openNote()}
+                            >
+                              {actionLabel}
+                            </Button>
+                          </div>
+                          <Button
                             type="button"
-                            onClick={() => setSelectedPostId(post.id)}
-                            className="w-full text-left"
+                            variant={
+                              post.status === "published" ? "outline" : "default"
+                            }
+                            className={`mt-3 h-10 w-full rounded-[8px] sm:hidden ${actionClass}`}
+                            onClick={() => void openNote()}
                           >
-                            <div className="flex items-center gap-2 text-xs text-[var(--coral)]">
-                              <span>{pillarLabel(post.pillar)}</span>
-                              <span className="text-[var(--ink-soft)]">
-                                {post.format === "tips"
-                                  ? "干货"
-                                  : post.format === "emotion"
-                                    ? "情绪"
-                                    : "故事"}
-                              </span>
-                              <span className="ml-auto text-[var(--ink-soft)]">
-                                {post.status === "published"
-                                  ? post.publishedAt
-                                    ? `已发布 ${post.publishedAt}`
-                                    : "已发布"
-                                  : post.status === "drafted"
-                                    ? "已起草"
-                                    : "待写"}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-sm font-medium text-[var(--ink)]">
-                              {post.titleHint}
-                            </p>
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--ink-soft)]">
-                              {post.angle}
-                              {post.materials.length
-                                ? ` · 素材 ${post.materials.length}`
-                                : ""}
-                            </p>
-                          </button>
-                          {post.status !== "published" ? (
-                            <div className="mt-2 flex justify-end">
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void (async () => {
-                                    if (!(await requireAuth())) return;
-                                    onOpenGenerate(post.id);
-                                  })();
-                                }}
-                              >
-                                生成
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="mt-2 flex justify-end">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onOpenGenerate(post.id);
-                                }}
-                              >
-                                查看
-                              </Button>
-                            </div>
-                          )}
+                            {actionLabel}
+                          </Button>
                         </div>
                       </li>
                     );

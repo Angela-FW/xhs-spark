@@ -105,6 +105,15 @@ export type SavedPersonaSlot = {
 };
 
 export const MAX_SAVED_PERSONAS = 10;
+export const MAX_CUSTOM_PERSONAS = 3;
+
+export function customPersonaCount(
+  workspaces: { persona: { presetId: PresetId } }[],
+): number {
+  return workspaces.filter(
+    (w) => normalizePresetId(w.persona.presetId) === "custom",
+  ).length;
+}
 
 export const PILLARS: {
   id: PillarId;
@@ -1862,4 +1871,53 @@ export function defaultPillarForPersona(persona: CreatorPersona): PillarId {
   if (persona.contentMix === "life") return "life";
   if (persona.contentMix === "career") return "resume";
   return "resume";
+}
+
+const INSIGHT_PLACEHOLDERS: Record<
+  Exclude<PresetId, "job-restart" | "career-growth">,
+  string
+> = {
+  home: "例如：今晚把阳台杂物清了一遍，才发现两平米也能摆出小咖啡角……",
+  beauty:
+    "例如：通勤妆画到一半眼线又飘了，黄皮这支口红上嘴完全不是试色样子……",
+  auto: "例如：早高峰堵了四十分钟，油耗一下子跳到 8.2，路边停车还是会手忙脚乱……",
+  resign: "例如：今天下午改简历改到烦，总觉得双非三个字像盖章……",
+  "career-daily":
+    "例如：今天下午会开到没结论，回来才发现自己又把边界让出去了……",
+  "life-journal":
+    "例如：下班路过那家面馆又在排队，今晚只想把灯调暗、把手机放下……",
+  custom: "例如：今天发生的一件小事，回头想想其实挺适合写成一篇……",
+};
+
+/** Placeholder for the insight inbox, matching the active persona. */
+export function insightPlaceholderForPersona(persona: CreatorPersona): string {
+  const id = normalizePresetId(persona.presetId);
+  if (id !== "custom") return INSIGHT_PLACEHOLDERS[id];
+
+  const text = personaDomainText(persona);
+  if (
+    persona.contentMix === "job" ||
+    /求职|离职|面试|简历|双非|找工作/.test(text)
+  ) {
+    return INSIGHT_PLACEHOLDERS.resign;
+  }
+  if (
+    persona.contentMix === "career" ||
+    /职场|晋升|协作|向上管理/.test(text)
+  ) {
+    return INSIGHT_PLACEHOLDERS["career-daily"];
+  }
+  if (/家居|收纳|软装|装修|租房改造|小户型/.test(text)) {
+    return INSIGHT_PLACEHOLDERS.home;
+  }
+  if (/美妆|化妆|口红|底妆|护肤|空瓶|妆容/.test(text)) {
+    return INSIGHT_PLACEHOLDERS.beauty;
+  }
+  if (/汽车|车主|开车|试驾|油耗|保养|停车/.test(text)) {
+    return INSIGHT_PLACEHOLDERS.auto;
+  }
+  if (/美食|做饭|探店|下厨|烘焙|菜谱/.test(text)) {
+    return "例如：今晚炒了个家常菜，火候没掌握好，不过那口汤倒是意外好喝……";
+  }
+  return INSIGHT_PLACEHOLDERS.custom;
 }
