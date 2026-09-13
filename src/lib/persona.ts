@@ -1892,7 +1892,12 @@ const INSIGHT_PLACEHOLDERS: Record<
 /** Placeholder for the insight inbox, matching the active persona. */
 export function insightPlaceholderForPersona(persona: CreatorPersona): string {
   const id = normalizePresetId(persona.presetId);
-  if (id !== "custom") return INSIGHT_PLACEHOLDERS[id];
+  if (id !== "custom") {
+    return (
+      INSIGHT_PLACEHOLDERS[id as keyof typeof INSIGHT_PLACEHOLDERS] ??
+      INSIGHT_PLACEHOLDERS.custom
+    );
+  }
 
   const text = personaDomainText(persona);
   if (

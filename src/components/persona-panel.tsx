@@ -27,7 +27,6 @@ const REBUILD_HINT =
 
 type PendingAction =
   | { kind: "system"; id: PresetId }
-  | { kind: "saved"; id: string }
   | { kind: "edit"; id: string }
   | { kind: "blank" }
   | { kind: "rebuild" }
