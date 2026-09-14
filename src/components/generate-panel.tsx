@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, ImageIcon, RefreshCw, Sparkles } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
 import { useAuth } from "@/components/auth-provider";
@@ -13,7 +13,6 @@ import {
 } from "@/lib/note-gen";
 import { generateNoteBodyForPost } from "@/lib/note-ai";
 import {
-  buildCoverPrompt,
   generateCoverImage,
 } from "@/lib/cover-image";
 import {
@@ -21,8 +20,12 @@ import {
   hasUsableCoverKeys,
   loadCoverKeys,
   toCoverCredentials,
+  usesLocalCoverFallback,
 } from "@/lib/cover-keys";
-import { composeTypographicCover, parseCoverBrief } from "@/lib/cover-compose";
+import {
+  extractCoverTextRequest,
+  overlayCoverText,
+} from "@/lib/cover-compose";
 import { pillarLabel, phaseLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,19 +71,11 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const [justGenerated, setJustGenerated] = useState(false);
   const [keysModalOpen, setKeysModalOpen] = useState(false);
   const [pendingCoverSeed, setPendingCoverSeed] = useState<number | null>(null);
-  const [keysReady, setKeysReady] = useState(() => hasUsableCoverKeys());
   const [confirmPublish, setConfirmPublish] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const bodyReqId = useRef(0);
   const requireAuthRef = useRef(requireAuth);
   requireAuthRef.current = requireAuth;
-
-  useEffect(() => {
-    const sync = () => setKeysReady(canGenerateAiCover(loadCoverKeys()));
-    sync();
-    window.addEventListener("restart-cover-keys", sync);
-    return () => window.removeEventListener("restart-cover-keys", sync);
-  }, []);
 
   useEffect(() => {
     setTitleSeed(0);
@@ -104,6 +99,24 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       });
       setTitleIndex(post.draft.titleIndex ?? 0);
       setDraftExtra(post.draft.extra ?? "");
+      setCoverPrompt("");
+      return;
+    }
+
+    if (post?.status === "published") {
+      const shell = generateNoteFromPost(
+        post,
+        state.persona,
+        post.draft?.extra ?? "",
+      );
+      setNote({
+        ...shell,
+        titles: post.draft?.titles?.length ? post.draft.titles : shell.titles,
+        body: post.draft?.body ?? "",
+        tags: post.draft?.tags ?? shell.tags,
+      });
+      setTitleIndex(post.draft?.titleIndex ?? 0);
+      setDraftExtra(post.draft?.extra ?? "");
       setCoverPrompt("");
       return;
     }
@@ -178,7 +191,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   }, [resultUrl]);
 
   function persistAndClose() {
-    if (post && note) {
+    if (post?.status !== "published" && post && note) {
       saveDraft(post.id, {
         titles: note.titles,
         titleIndex,
@@ -278,51 +291,23 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
     });
   }
 
-  const autoCoverPrompt = useMemo(() => {
-    if (!post || !note) return "";
-    return [
-      "Xiaohongshu vertical cover 3:4",
-      `title: ${selectedTitle || post.titleHint}`,
-      `theme: ${post.angle}`,
-      `body cues: ${note.body.replace(/\s+/g, " ").slice(0, 160)}`,
-      "warm paper tones, coral accent, realistic lifestyle photo, no text overlay, no watermark",
-    ].join(", ");
-  }, [post, note, selectedTitle]);
-
-  const activePrompt = coverPrompt.trim() || autoCoverPrompt;
-
   async function generateCover(nextSeed?: number) {
     if (!post) return;
     if (!(await requireAuth())) return;
     setGenError(null);
 
-    const promptToUse = coverPrompt.trim() || autoCoverPrompt;
-    if (!promptToUse) {
+    const userPrompt = coverPrompt.trim();
+    if (!userPrompt && !note?.body && !selectedTitle) {
       setGenError("请先生成正文，或填写提示词");
       return;
     }
 
-    const brief = parseCoverBrief(promptToUse);
-    // Structured 内容/风格/颜色 → local typography（不走文生图，无需 Key）
-    if (brief.wantsText && brief.contentItems.length > 0) {
-      const useSeed = nextSeed ?? (seed || Date.now() % 100000);
-      setSeed(useSeed);
-      setBusy(true);
-      try {
-        const url = await composeTypographicCover(brief, {
-          title: selectedTitle || post.titleHint,
-        });
-        if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
-        setResultUrl(url);
-      } catch (err) {
-        setGenError(err instanceof Error ? err.message : "封面合成失败");
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
+    const textReq = extractCoverTextRequest(
+      userPrompt,
+      selectedTitle || post.titleHint,
+    );
 
-    // AI 文生图：必须用当前用户自己的 Key
+    // Production: user-supplied keys. Local next dev: server CLOUDFLARE_* fallback.
     const creds = toCoverCredentials(loadCoverKeys());
     if (!canGenerateAiCover(creds)) {
       setPendingCoverSeed(nextSeed ?? null);
@@ -335,11 +320,19 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
     setBusy(true);
 
     try {
-      const url = await generateCoverImage(post, {
+      let url = await generateCoverImage(post, {
         seed: useSeed,
-        prompt: promptToUse,
+        title: selectedTitle || post.titleHint,
+        noteBody: note?.body,
+        userPrompt,
+        persona: state.persona,
         credentials: creds,
       });
+      if (textReq.lines.length > 0) {
+        const withText = await overlayCoverText(url, textReq.lines);
+        if (withText !== url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+        url = withText;
+      }
       if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
       setResultUrl(url);
     } catch (err) {
@@ -375,7 +368,6 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
           setPendingCoverSeed(null);
         }}
         onConfigured={() => {
-          setKeysReady(true);
           const seedToUse = pendingCoverSeed;
           setPendingCoverSeed(null);
           void generateCover(seedToUse ?? undefined);
@@ -386,34 +378,91 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
           <Button type="button" size="sm" variant="outline" onClick={persistAndClose}>
             ← 返回日历
           </Button>
-          <p className="truncate text-sm text-[var(--ink-soft)]">
-            关闭时自动保存草稿
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-            onClick={persistAndClose}
-          >
-            保存并返回
-          </Button>
+          {post.status === "published" ? (
+            <p className="truncate pr-2 text-sm text-[var(--ink-soft)]">
+              成稿预览{post.publishedAt ? ` · ${post.publishedAt}` : ""}
+            </p>
+          ) : (
+            <>
+              <p className="truncate text-sm text-[var(--ink-soft)]">
+                关闭时自动保存草稿
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
+                onClick={persistAndClose}
+              >
+                保存并返回
+              </Button>
+            </>
+          )}
         </div>
       ) : null}
-      <div className="studio-shell rounded-2xl p-5">
-        <div className="mb-3 flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
-            <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-              点选一条作为当前标题；也可直接改字。换标题或点「重新生成正文」都会按当前标题重写。
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={regenerateTitles}>
-              <RefreshCw className="size-3.5" />
-              重新生成标题
-            </Button>
+      {post.status === "published" ? (
+        <div className="studio-shell rounded-2xl p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-[var(--coral)]">
+                已发布成稿
+                {post.publishedAt ? ` · ${post.publishedAt}` : ""}
+                {" · "}
+                第{post.week}周 · {phaseLabel(post.phase, state.persona)} ·{" "}
+                {pillarLabel(post.pillar)}
+              </p>
+              <h3 className="font-display mt-1 text-lg text-[var(--ink)]">
+                {selectedTitle || post.titleHint}
+              </h3>
+              {post.angle ? (
+                <p className="mt-1 text-sm text-[var(--ink-soft)]">{post.angle}</p>
+              ) : null}
+            </div>
             <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
           </div>
+          {resultUrl ? (
+            <div className="mt-4 overflow-hidden rounded-xl bg-white/70">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={resultUrl}
+                alt="封面"
+                className="mx-auto max-h-[480px] w-full object-contain"
+              />
+            </div>
+          ) : null}
+          <pre className="mt-4 whitespace-pre-wrap rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink)]">
+            {note.body || "这篇还没有保存正文。"}
+          </pre>
+          {note.tags.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {note.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-md bg-[var(--coral)]/10 px-2 py-1 text-xs text-[var(--coral-deep)]"
+                >
+                  {tag}
+                </span>
+              ))}
+              <CopyBtn text={note.tags.join(" ")} label="复制标签" />
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <>
+      <div className="studio-shell rounded-2xl p-5">
+        <div className="mb-3">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="font-display text-base text-[var(--ink)]">标题备选</h4>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={regenerateTitles}>
+                <RefreshCw className="size-3.5" />
+                重新生成标题
+              </Button>
+              <CopyBtn text={formatFullNote(note, titleIndex)} label="复制整篇" />
+            </div>
+          </div>
+          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+            点选一条作为当前标题；也可直接改字。换标题或点「重新生成正文」都会按当前标题重写。
+          </p>
         </div>
         <ul className="space-y-2">
           {note.titles.map((t, i) => (
@@ -553,23 +602,27 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
               换一张
             </Button>
             <CopyBtn
-              text={activePrompt || buildCoverPrompt(post)}
+              text={coverPrompt.trim() || selectedTitle || post.titleHint}
               label="复制提示词"
             />
           </div>
         </div>
 
         <p className="mb-4 text-xs text-[var(--ink-soft)]">
-          {keysReady
+          {hasUsableCoverKeys()
             ? "已配置你的生图 Key（登录后跨设备同步）。"
-            : "生图需填写你自己的 Key；登录后会同步到账号，不占用别人额度。"}{" "}
-          <button
-            type="button"
-            className="text-[var(--coral-deep)] underline-offset-2 hover:underline"
-            onClick={() => setKeysModalOpen(true)}
-          >
-            {hasUsableCoverKeys() ? "修改 Key" : "配置 Key"}
-          </button>
+            : usesLocalCoverFallback()
+              ? "本地测试直接使用 .env.local 里的生图 Key，无需再配。"
+              : "生图需填写你自己的 Key；登录后会同步到账号，不占用别人额度。"}{" "}
+          {usesLocalCoverFallback() && !hasUsableCoverKeys() ? null : (
+            <button
+              type="button"
+              className="text-[var(--coral-deep)] underline-offset-2 hover:underline"
+              onClick={() => setKeysModalOpen(true)}
+            >
+              {hasUsableCoverKeys() ? "修改 Key" : "配置 Key"}
+            </button>
+          )}
         </p>
 
         <div className="space-y-2 rounded-xl border border-[var(--coral)]/25 bg-[var(--coral)]/5 p-4">
@@ -581,7 +634,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
             value={coverPrompt}
             onChange={(e) => setCoverPrompt(e.target.value)}
             className="min-h-32 bg-white"
-            placeholder="可留空。留空时将根据当前标题和正文自动匹配生成封面…"
+            placeholder="可留空。也可自己补充场景、构图、光线。要在图上加字可写：内容：五分钟通勤妆，或写上「通勤妆」。"
           />
         </div>
 
@@ -624,21 +677,18 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          disabled={post.status === "published"}
+          className="h-11 px-6"
           onClick={() => setPostStatus(post.id, "drafted")}
         >
           标为已起草
         </Button>
         <Button
           type="button"
-          size="sm"
-          className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-          disabled={post.status === "published"}
+          className="h-11 bg-[var(--coral)] px-6 text-white hover:bg-[var(--coral-deep)]"
           onClick={() => setConfirmPublish(true)}
         >
-          {post.status === "published" ? "已发布" : "标为已发布（记下今天）"}
+          标为已发布（记下今天）
         </Button>
       </div>
 
@@ -649,11 +699,20 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
         confirmLabel="确认发布"
         danger
         onConfirm={() => {
+          saveDraft(post.id, {
+            titles: note.titles,
+            titleIndex,
+            body: note.body,
+            tags: note.tags,
+            extra: draftExtra,
+          });
           setPostStatus(post.id, "published");
           setConfirmPublish(false);
         }}
         onCancel={() => setConfirmPublish(false)}
       />
+        </>
+      )}
     </div>
   );
 }

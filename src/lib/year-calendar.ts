@@ -100,6 +100,47 @@ export function mondayOnOrAfter(iso: string): string {
   return formatLocalYmd(d);
 }
 
+/** Week 1 starts at `week1Start`. Dates before that clamp to week 1. */
+export function weekNumberForDate(week1Start: string, iso: string): number {
+  const days = diffCalendarDays(week1Start, iso);
+  if (days < 0) return 1;
+  return Math.floor(days / 7) + 1;
+}
+
+/**
+ * Monday that week 1 should keep for published notes.
+ * Unpublished dates may drift forward; don't let that rewrite history.
+ */
+export function publishedWeekOrigin(
+  calendarStart: string,
+  publishedDates: string[],
+): string {
+  if (!publishedDates.length) return calendarStart;
+  const earliest = publishedDates.reduce((a, b) => (a < b ? a : b));
+  return earliest < calendarStart ? mondayOnOrAfter(earliest) : calendarStart;
+}
+
+export function weekStartForWeek(week1Start: string, week: number): string {
+  return addDays(week1Start, Math.max(0, week - 1) * 7);
+}
+
+export function uniqueCalendarPostId(
+  existingIds: Set<string>,
+  week: number,
+  indexInWeek: number,
+): string {
+  const base = `w${week}-p${indexInWeek + 1}`;
+  if (!existingIds.has(base)) {
+    existingIds.add(base);
+    return base;
+  }
+  let n = 2;
+  while (existingIds.has(`${base}-${n}`)) n += 1;
+  const id = `${base}-${n}`;
+  existingIds.add(id);
+  return id;
+}
+
 export function isCalendarStartInPast(
   calendarStart: string,
   today = new Date(),

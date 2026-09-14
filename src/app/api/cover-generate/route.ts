@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { distillCoverPromptWithLlm } from "@/lib/cover-distill-server";
 import { buildFluxPrompt } from "@/lib/cover-prompt";
+import { resolveCoverVisualPrompt } from "@/lib/cover-scene";
+import {
+  isLocalCoverFallback,
+  resolveCloudflareCoverCreds,
+  resolveCoverApiKey,
+} from "@/lib/cover-server";
 import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -8,6 +15,18 @@ export type CoverProvider = "cloudflare" | "siliconflow" | "pollinations";
 
 type Body = {
   prompt?: string;
+  title?: string;
+  noteBody?: string;
+  angle?: string;
+  userPrompt?: string;
+  presetId?: string;
+  contentMix?: string;
+  format?: string;
+  personaName?: string;
+  background?: string;
+  audience?: string;
+  stage?: string;
+  voice?: string;
   provider?: CoverProvider;
   seed?: number | string;
   size?: string;
@@ -42,8 +61,7 @@ async function generateCloudflare(opts: {
 }) {
   const model = "@cf/black-forest-labs/flux-1-schnell";
   const url = `https://api.cloudflare.com/client/v4/accounts/${opts.accountId}/ai/run/${model}`;
-  // Flux follows English much better; keep user intent first, never force a portrait.
-  const prompt = buildFluxPrompt(opts.prompt);
+  const prompt = opts.prompt;
   const upstream = await fetch(url, {
     method: "POST",
     headers: {
@@ -53,6 +71,7 @@ async function generateCloudflare(opts: {
     body: JSON.stringify({
       prompt,
       steps: 6,
+      seed: opts.seed,
     }),
   });
 
@@ -240,7 +259,24 @@ export async function POST(req: NextRequest) {
     if (!gate.ok) return gate.response;
 
     const body = (await req.json()) as Body;
-    const prompt = String(body.prompt ?? "").trim();
+    const distillInput = {
+      prompt: body.prompt,
+      title: body.title,
+      body: body.noteBody,
+      angle: body.angle,
+      userPrompt: body.userPrompt,
+      presetId: body.presetId,
+      contentMix: body.contentMix,
+      format: body.format,
+      personaName: body.personaName,
+      background: body.background,
+      audience: body.audience,
+      stage: body.stage,
+      voice: body.voice,
+    };
+    const fallback = resolveCoverVisualPrompt(distillInput);
+    const translated = await distillCoverPromptWithLlm(distillInput);
+    const prompt = buildFluxPrompt(translated || fallback);
     if (!prompt) return jsonError("需要 prompt", 400);
 
     const provider: CoverProvider = body.provider || "cloudflare";
@@ -250,14 +286,18 @@ export async function POST(req: NextRequest) {
     const image = body.image?.trim() || undefined;
 
     if (provider === "cloudflare") {
-      const accountId = body.cloudflareAccountId?.trim() || "";
-      const token =
-        body.cloudflareToken?.trim() ||
-        req.headers.get("x-cloudflare-token")?.trim() ||
-        "";
+      const { accountId, token } = resolveCloudflareCoverCreds({
+        accountId: body.cloudflareAccountId,
+        token:
+          body.cloudflareToken?.trim() ||
+          req.headers.get("x-cloudflare-token")?.trim() ||
+          "",
+      });
       if (!accountId || !token) {
         return jsonError(
-          "未配置生图 Key：请在生成页填写你自己的 Cloudflare Account ID 与 API Token（登录后会同步到账号）。",
+          isLocalCoverFallback()
+            ? "本地未配置生图：请在 .env.local 填写 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN。"
+            : "未配置生图 Key：请在生成页填写你自己的 Cloudflare Account ID 与 API Token（登录后会同步到账号）。",
           401,
         );
       }
@@ -268,13 +308,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (provider === "siliconflow") {
-      const apiKey =
-        body.apiKey?.trim() ||
-        req.headers.get("x-siliconflow-key")?.trim() ||
-        "";
+      const apiKey = resolveCoverApiKey(
+        body.apiKey?.trim() || req.headers.get("x-siliconflow-key")?.trim() || "",
+        "SILICONFLOW_API_KEY",
+      );
       if (!apiKey) {
         return jsonError(
-          "未配置硅基流动 Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
+          isLocalCoverFallback()
+            ? "本地未配置硅基流动：请填写页面 Key，或在 .env.local 增加 SILICONFLOW_API_KEY。"
+            : "未配置硅基流动 Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
           401,
         );
       }
@@ -282,13 +324,15 @@ export async function POST(req: NextRequest) {
     }
 
     // pollinations
-    const apiKey =
-      body.apiKey?.trim() ||
-      req.headers.get("x-pollinations-key")?.trim() ||
-      "";
+    const apiKey = resolveCoverApiKey(
+      body.apiKey?.trim() || req.headers.get("x-pollinations-key")?.trim() || "",
+      "POLLINATIONS_API_KEY",
+    );
     if (!apiKey) {
       return jsonError(
-        "未配置 Pollinations Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
+        isLocalCoverFallback()
+          ? "本地未配置 Pollinations：请填写页面 Key，或在 .env.local 增加 POLLINATIONS_API_KEY。"
+          : "未配置 Pollinations Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
         401,
       );
     }

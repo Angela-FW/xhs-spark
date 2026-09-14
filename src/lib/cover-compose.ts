@@ -9,6 +9,77 @@ export type CoverBrief = {
   wantsText: boolean;
 };
 
+export type CoverTextRequest = {
+  wantsText: boolean;
+  lines: string[];
+};
+
+const WANT_TEXT_RE =
+  /加文字|配文字|叠字|叠文字|封面写|写上字|带字|放文字|加上文字|标题文字|写上标题|加上标题|用标题|把标题|写上「|写上“|写上"|文字\s*[:：]|内容\s*[:：]|文案\s*[:：]/;
+
+/** Only when the user prompt explicitly asks to put words on the cover. */
+export function extractCoverTextRequest(
+  userPrompt: string,
+  fallbackTitle = "",
+): CoverTextRequest {
+  const raw = userPrompt.trim();
+  if (!raw) return { wantsText: false, lines: [] };
+
+  const fieldText =
+    matchField(raw, "内容") ||
+    matchField(raw, "文案") ||
+    matchField(raw, "文字");
+  const fieldItems = splitContentLines(fieldText);
+
+  const quoted: string[] = [];
+  for (const re of [
+    /[「『]([^」』]{1,40})[」』]/g,
+    /[“"]([^”"]{1,40})[”"]/g,
+  ]) {
+    for (const m of raw.matchAll(re)) {
+      const t = m[1]?.trim();
+      if (t) quoted.push(t);
+    }
+  }
+
+  const afterVerb = raw.match(
+    /(?:写上|叠上|带上)(?:文字|字)?\s*[:：]?\s*([^\n]{1,40})/,
+  );
+  const afterCoverWrite = raw.match(
+    /封面写(?:上|字)?\s*[:：]?\s*([^\n]{1,40})/,
+  );
+  let verbText = (afterVerb?.[1] || afterCoverWrite?.[1] || "").trim();
+  verbText = verbText.replace(/^[「『“"]|[」』”"]$/g, "").trim();
+  if (/^(文字|字|标题)$/.test(verbText)) verbText = "";
+
+  const wantsTitle = /写上标题|加上标题|用标题|把标题|标题文字/.test(raw);
+  const wantsText =
+    fieldItems.length > 0 ||
+    Boolean(fieldText) ||
+    quoted.length > 0 ||
+    Boolean(verbText) ||
+    wantsTitle ||
+    WANT_TEXT_RE.test(raw);
+
+  if (!wantsText) return { wantsText: false, lines: [] };
+
+  const lines: string[] = [];
+  const push = (value: string) => {
+    const t = value.replace(/\s+/g, " ").trim();
+    if (!t || /^(文字|字|标题)$/.test(t)) return;
+    const clipped = t.length > 80 ? t.slice(0, 80) : t;
+    if (!lines.includes(clipped)) lines.push(clipped);
+  };
+
+  for (const item of fieldItems) push(item);
+  if (!fieldItems.length && fieldText) push(fieldText);
+  for (const item of quoted) push(item);
+  if (verbText) push(verbText);
+  if (wantsTitle && fallbackTitle.trim()) push(fallbackTitle.trim());
+
+  return { wantsText: true, lines: lines.slice(0, 3) };
+}
+
 export function parseCoverBrief(prompt: string): CoverBrief {
   const raw = prompt.trim();
   const content =
@@ -17,22 +88,41 @@ export function parseCoverBrief(prompt: string): CoverBrief {
     matchField(raw, "文字");
   const style = matchField(raw, "风格") || matchField(raw, "样式") || "";
   const color = matchField(raw, "颜色") || matchField(raw, "配色") || "";
-
-  const contentItems = splitItems(content);
-  const wantsText =
-    contentItems.length > 0 ||
-    /加文字|配文字|标题文字|文字内容|写上|带字/.test(raw);
-
-  return { raw, contentItems, style, color, wantsText };
+  const textReq = extractCoverTextRequest(raw);
+  return {
+    raw,
+    contentItems: splitItems(content),
+    style,
+    color,
+    wantsText: textReq.wantsText,
+  };
 }
 
 function matchField(text: string, label: string): string {
   const re = new RegExp(
-    `${label}\\s*[:：]\\s*([^\\n]+)`,
+    `${label}\\s*[:：]\\s*([^\\n]*)`,
     "i",
   );
   const m = text.match(re);
-  return m?.[1]?.trim() || "";
+  if (!m) return "";
+  let value = (m[1] || "").trim();
+  if (!value) {
+    const after = text.slice((m.index ?? 0) + m[0].length);
+    const next = after.match(/^\s*\n+\s*([^\n]+)/);
+    value = next?.[1]?.trim() || "";
+  }
+  return value
+    .replace(/\s*(?:风格|样式|颜色|配色|画面)\s*[:：].*$/u, "")
+    .trim();
+}
+
+function splitContentLines(value: string): string[] {
+  const t = value.trim();
+  if (!t) return [];
+  if (/[,，、;；|/]/.test(t) && t.length <= 80) {
+    return splitItems(t);
+  }
+  return [t];
 }
 
 function splitItems(value: string): string[] {
@@ -195,6 +285,158 @@ export async function composeTypographicCover(
   );
   if (!blob) throw new Error("封面合成失败");
   return URL.createObjectURL(blob);
+}
+
+const NOTE_COVER_WIDTH = 1080;
+const NOTE_COVER_HEIGHT = 1440;
+
+/** Center-crop / scale any generated image to Xiaohongshu 3:4 (1080×1440). */
+export async function fitCoverToNoteSize(imageUrl: string): Promise<string> {
+  const width = NOTE_COVER_WIDTH;
+  const height = NOTE_COVER_HEIGHT;
+  const bitmap = await bitmapFromUrl(imageUrl);
+  try {
+    if (bitmap.width === width && bitmap.height === height) return imageUrl;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法创建画布");
+
+    const scale = Math.max(width / bitmap.width, height / bitmap.height);
+    const dw = bitmap.width * scale;
+    const dh = bitmap.height * scale;
+    ctx.drawImage(bitmap, (width - dw) / 2, (height - dh) / 2, dw, dh);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.92),
+    );
+    if (!blob) throw new Error("封面裁切失败");
+    if (imageUrl.startsWith("blob:")) URL.revokeObjectURL(imageUrl);
+    return URL.createObjectURL(blob);
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * Draw user-requested Chinese onto a generated photo.
+ * Flux cannot paint CJK; we overlay only when the user asked for text.
+ */
+export async function overlayCoverText(
+  imageUrl: string,
+  lines: string[],
+  options?: {
+    width?: number;
+    height?: number;
+  },
+): Promise<string> {
+  const cleaned = lines
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  if (!cleaned.length) return imageUrl;
+
+  const width = options?.width ?? 1080;
+  const height = options?.height ?? 1440;
+  const bitmap = await bitmapFromUrl(imageUrl);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    throw new Error("无法创建画布");
+  }
+
+  const scale = Math.max(width / bitmap.width, height / bitmap.height);
+  const dw = bitmap.width * scale;
+  const dh = bitmap.height * scale;
+  ctx.drawImage(bitmap, (width - dw) / 2, (height - dh) / 2, dw, dh);
+  bitmap.close();
+
+  const fadeH = Math.round(height * 0.42);
+  const fade = ctx.createLinearGradient(0, height - fadeH, 0, height);
+  fade.addColorStop(0, "rgba(28, 22, 18, 0)");
+  fade.addColorStop(0.45, "rgba(28, 22, 18, 0.35)");
+  fade.addColorStop(1, "rgba(28, 22, 18, 0.72)");
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, height - fadeH, width, fadeH);
+
+  const pad = 72;
+  const [main, ...rest] = cleaned;
+  const sub = rest.join(" · ");
+  const fontStack =
+    '"PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif';
+
+  ctx.fillStyle = "#fffaf6";
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 2;
+  ctx.textBaseline = "alphabetic";
+
+  ctx.font = `600 64px ${fontStack}`;
+  const mainLines = wrapLines(ctx, main, width - pad * 2).slice(0, 3);
+  ctx.font = `500 36px ${fontStack}`;
+  const subLines = sub ? wrapLines(ctx, sub.slice(0, 28), width - pad * 2).slice(0, 1) : [];
+
+  const mainLh = 76;
+  const subLh = 48;
+  const blockH =
+    mainLines.length * mainLh + (subLines.length ? 16 + subLines.length * subLh : 0);
+  let y = height - pad - blockH + 56;
+
+  ctx.font = `600 64px ${fontStack}`;
+  ctx.fillStyle = "#fffaf6";
+  for (const line of mainLines) {
+    ctx.fillText(line, pad, y);
+    y += mainLh;
+  }
+  if (subLines.length) {
+    y += 8;
+    ctx.font = `500 36px ${fontStack}`;
+    ctx.fillStyle = "rgba(255,250,246,0.88)";
+    for (const line of subLines) {
+      ctx.fillText(line, pad, y);
+      y += subLh;
+    }
+  }
+
+  ctx.shadowColor = "transparent";
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", 0.92),
+  );
+  if (!blob) throw new Error("封面叠字失败");
+  return URL.createObjectURL(blob);
+}
+
+async function bitmapFromUrl(url: string): Promise<ImageBitmap> {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return createImageBitmap(blob);
+}
+
+function wrapLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const ch of text) {
+    const test = line + ch;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = ch;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }
 
 function wrapText(

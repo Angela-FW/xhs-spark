@@ -227,44 +227,61 @@ export function processInsights(
 export function recommendPostsForInsight(
   insight: InsightCard,
   posts: CalendarPost[],
-  fromWeek = 1,
+  fromWeek?: number,
 ): { post: CalendarPost; reason: string }[] {
+  const unpublished = posts.filter((p) => p.status !== "published");
+  const earliestWeek = unpublished.reduce(
+    (min, p) => Math.min(min, p.week),
+    Number.POSITIVE_INFINITY,
+  );
+  const from =
+    fromWeek ??
+    (Number.isFinite(earliestWeek) ? earliestWeek : 1);
   const keywords = collectKeywords(`${insight.raw} ${insight.polished}`);
-  const candidates = posts
-    .filter((p) => p.status === "planned" && p.week >= fromWeek)
-    .filter((p) => p.week <= fromWeek + 5 || p.pillar === insight.pillar);
+  const candidates = unpublished.filter(
+    (p) => p.week >= from && (p.week <= from + 5 || p.pillar === insight.pillar),
+  );
 
   const scored = candidates
     .map((post) => {
       let score = 0;
       const reasons: string[] = [];
-      const weekGap = post.week - fromWeek;
+      const weekGap = post.week - from;
       const overlap = keywordOverlap(
         keywords,
         collectKeywords(`${post.titleHint} ${post.angle} ${post.hooks.join(" ")}`),
       );
 
-      if (post.pillar === insight.pillar) {
-        score += 4;
-        reasons.push("支柱一致");
-      }
-
-      if (weekGap <= 1) {
-        score += 4;
+      // Recency first: the next unpublished note should outrank pillar match.
+      if (weekGap === 0) {
+        score += 10;
+        reasons.push("下一篇待发");
+      } else if (weekGap === 1) {
+        score += 5;
         reasons.push("提交时间很近");
       } else if (weekGap <= 3) {
-        score += 2.5;
+        score += 2;
         reasons.push("近几周可发");
       } else if (weekGap <= 5) {
-        score += 1;
+        score += 0.8;
         reasons.push("可提前备稿");
       } else {
         score -= 3;
         reasons.push("离当前太远");
       }
 
+      if (post.status === "drafted") {
+        score += 1.2;
+        reasons.push("已起草");
+      }
+
+      if (post.pillar === insight.pillar) {
+        score += 3;
+        reasons.push("支柱一致");
+      }
+
       if (overlap > 0) {
-        score += Math.min(4, overlap * 1.4);
+        score += Math.min(3, overlap * 1.2);
         reasons.push(`内容匹配 ${overlap} 处`);
       }
 

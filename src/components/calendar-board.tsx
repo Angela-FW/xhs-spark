@@ -1,9 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useAppStore } from "@/components/app-store";
 import { useAuth } from "@/components/auth-provider";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SwipeDeleteRow } from "@/components/swipe-delete-row";
 import { pillarLabel } from "@/lib/persona";
+import { weekStartForWeek } from "@/lib/year-calendar";
 import { Button } from "@/components/ui/button";
 
 export function CalendarBoard({
@@ -11,8 +14,9 @@ export function CalendarBoard({
 }: {
   onOpenGenerate: (postId: string) => void;
 }) {
-  const { state, setSelectedPostId, generateMoreWeek } = useAppStore();
+  const { state, setSelectedPostId, generateMoreWeek, deletePost } = useAppStore();
   const { requireAuth } = useAuth();
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const weeks = useMemo(() => {
     const map = new Map<number, typeof state.posts>();
@@ -36,7 +40,8 @@ export function CalendarBoard({
         {weeks.map(([week, posts]) => {
           const weekDate =
             posts.find((p) => p.status !== "published")?.weekStart ??
-            posts[0]?.weekStart;
+            posts[0]?.weekStart ??
+            weekStartForWeek(state.calendarStart, week);
           const isFrontier = week === absoluteMaxWeek;
           return (
             <section
@@ -82,6 +87,7 @@ export function CalendarBoard({
                         : "bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]";
                     return (
                       <li key={post.id}>
+                        <SwipeDeleteRow onDelete={() => setPendingDeleteId(post.id)}>
                         <div
                           className={`rounded-xl border px-3 py-2.5 transition ${
                             selected
@@ -141,6 +147,7 @@ export function CalendarBoard({
                             {actionLabel}
                           </Button>
                         </div>
+                        </SwipeDeleteRow>
                       </li>
                     );
                   })}
@@ -174,6 +181,19 @@ export function CalendarBoard({
           </div>
         ) : null}
       </div>
+      <ConfirmDialog
+        open={Boolean(pendingDeleteId)}
+        title="确定删除这篇笔记？"
+        message={"删除后不可恢复。"}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        onConfirm={() => {
+          if (pendingDeleteId) deletePost(pendingDeleteId);
+          setPendingDeleteId(null);
+        }}
+        onCancel={() => setPendingDeleteId(null)}
+      />
     </div>
   );
 }

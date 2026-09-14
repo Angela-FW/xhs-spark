@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
+import { polishInsightCards } from "@/lib/insight-ai";
 import { processInsights, recommendPostsForInsight } from "@/lib/insights";
 import { insightPlaceholderForPersona, pillarLabel } from "@/lib/persona";
 import { Button } from "@/components/ui/button";
@@ -13,10 +14,9 @@ export function InsightInbox() {
   const { state, addInsights, deleteInsight, assignInsight } = useAppStore();
   const [raw, setRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const currentWeek = inferCurrentWeek(state.calendarStart);
-
-  function onProcess() {
+  async function onProcess() {
     if (!raw.trim()) {
       setError("先粘贴一段近期感悟");
       return;
@@ -27,8 +27,18 @@ export function InsightInbox() {
       setError("没有识别到可用片段，试着多写几句或分段");
       return;
     }
-    addInsights(cards);
-    setRaw("");
+    setBusy(true);
+    try {
+      const polished = await polishInsightCards(cards, state.persona);
+      addInsights(polished);
+      setRaw("");
+    } catch {
+      addInsights(cards);
+      setRaw("");
+      setError("模型润色失败，已先用本地整理入库");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -36,7 +46,7 @@ export function InsightInbox() {
       <div className="studio-shell rounded-2xl p-5">
         <h3 className="font-display text-lg text-[var(--ink)]">灵感收集箱</h3>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          不定期粘贴零散想法。我会帮你润色，并推荐到近期更相关的笔记。
+          不定期粘贴零散想法。我会帮你润色措辞，并优先推荐到还没发布、更靠前的笔记。
         </p>
         <div className="mt-4 space-y-2">
           <Label htmlFor="insight-raw">近期感悟</Label>
@@ -46,6 +56,7 @@ export function InsightInbox() {
             onChange={(e) => setRaw(e.target.value)}
             placeholder={insightPlaceholderForPersona(state.persona)}
             className="min-h-32 bg-white/80"
+            disabled={busy}
           />
         </div>
         {error ? (
@@ -57,9 +68,10 @@ export function InsightInbox() {
           <Button
             type="button"
             className="bg-[var(--coral)] text-white hover:bg-[var(--coral-deep)]"
-            onClick={onProcess}
+            disabled={busy}
+            onClick={() => void onProcess()}
           >
-            整理并入库
+            {busy ? "正在润色…" : "整理并入库"}
           </Button>
         </div>
       </div>
@@ -71,11 +83,7 @@ export function InsightInbox() {
       ) : (
         <ul className="space-y-4">
           {state.insights.map((insight) => {
-            const recs = recommendPostsForInsight(
-              insight,
-              state.posts,
-              currentWeek,
-            );
+            const recs = recommendPostsForInsight(insight, state.posts);
             return (
               <li key={insight.id} className="studio-shell rounded-2xl p-4 sm:p-5">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--coral)]">
@@ -104,29 +112,35 @@ export function InsightInbox() {
                 </p>
                 <div className="mt-3 space-y-2">
                   <p className="text-xs font-medium text-[var(--ink)]">推荐挂到</p>
-                  {recs.map(({ post, reason }) => (
-                    <div
-                      key={post.id}
-                      className="flex flex-wrap items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-sm"
-                    >
-                      <span className="text-[var(--ink)]">
-                        第{post.week}周 · {post.titleHint}
-                      </span>
-                      <span className="text-xs text-[var(--ink-soft)]">{reason}</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="ml-auto"
-                        disabled={insight.assignedPostIds.includes(post.id)}
-                        onClick={() => assignInsight(insight.id, post.id)}
+                  {recs.length ? (
+                    recs.map(({ post, reason }) => (
+                      <div
+                        key={post.id}
+                        className="flex flex-wrap items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-sm"
                       >
-                        {insight.assignedPostIds.includes(post.id)
-                          ? "已挂载"
-                          : "采纳到该篇"}
-                      </Button>
-                    </div>
-                  ))}
+                        <span className="text-[var(--ink)]">
+                          第{post.week}周 · {post.titleHint}
+                        </span>
+                        <span className="text-xs text-[var(--ink-soft)]">{reason}</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="ml-auto"
+                          disabled={insight.assignedPostIds.includes(post.id)}
+                          onClick={() => assignInsight(insight.id, post.id)}
+                        >
+                          {insight.assignedPostIds.includes(post.id)
+                            ? "已挂载"
+                            : "采纳到该篇"}
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-[var(--ink-soft)]">
+                      近期没有未发布的笔记可挂。
+                    </p>
+                  )}
                 </div>
               </li>
             );
@@ -135,14 +149,4 @@ export function InsightInbox() {
       )}
     </div>
   );
-}
-
-function inferCurrentWeek(calendarStart: string): number {
-  const start = new Date(`${calendarStart}T00:00:00`);
-  const today = new Date();
-  const diffDays = Math.max(
-    0,
-    Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)),
-  );
-  return Math.floor(diffDays / 7) + 1;
 }

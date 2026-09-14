@@ -31,6 +31,7 @@ import {
   selectSavedPersona,
   setPostPublishStatus,
   startFromPreset,
+  deleteCalendarPost,
   updatePersonaFields,
   upsertSavedPersona,
 } from "@/lib/store";
@@ -80,6 +81,7 @@ type StoreApi = {
   pickSavedPersona: (id: string) => void;
   startBlankCustom: () => void;
   generateMoreWeek: () => void;
+  deletePost: (postId: string) => void;
   exportJson: () => string;
   importJson: (json: string) => void;
   resetAll: () => void;
@@ -356,6 +358,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((s) => appendNextCalendarWeek(s));
   }, []);
 
+  const deletePost = useCallback((postId: string) => {
+    setState((s) => deleteCalendarPost(s, postId));
+  }, []);
+
   const exportJson = useCallback(() => exportState(state), [state]);
 
   const importJson = useCallback((json: string) => {
@@ -392,6 +398,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       pickSavedPersona,
       startBlankCustom,
       generateMoreWeek,
+      deletePost,
       exportJson,
       importJson,
       resetAll,
@@ -420,6 +427,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       pickSavedPersona,
       startBlankCustom,
       generateMoreWeek,
+      deletePost,
       exportJson,
       importJson,
       resetAll,

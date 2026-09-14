@@ -5,7 +5,7 @@ export default function Home() {
     <main className="flex-1">
       <PlannerApp />
       <footer className="border-t border-[var(--ink-soft)]/10 px-5 py-8 text-center text-xs text-[var(--ink-soft)]">
-        灵感笔记 · 选人设、排 4 周路线、生成笔记
+        灵感笔记.选人设.排路线.生成笔记
       </footer>
     </main>
   );

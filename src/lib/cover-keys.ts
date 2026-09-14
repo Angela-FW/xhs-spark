@@ -68,11 +68,16 @@ export function hasUsableCoverKeys(keys: StoredCoverKeys = loadCoverKeys()): boo
   return Boolean(keys.pollinationsKey?.trim());
 }
 
-/** Only the signed-in user's own keys — no shared site quota. */
+/** Local `next dev` uses server CLOUDFLARE_* so you don't have to paste keys. */
+export function usesLocalCoverFallback(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
+/** User keys, or the local-dev server fallback. Production still needs user keys. */
 export function canGenerateAiCover(
   keys: StoredCoverKeys = loadCoverKeys(),
 ): boolean {
-  return hasUsableCoverKeys(keys);
+  return hasUsableCoverKeys(keys) || usesLocalCoverFallback();
 }
 
 export function toCoverCredentials(keys: StoredCoverKeys): CoverCredentials {

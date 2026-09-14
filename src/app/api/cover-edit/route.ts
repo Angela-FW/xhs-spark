@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildFluxPrompt } from "@/lib/cover-prompt";
+import {
+  isLocalCoverFallback,
+  resolveCloudflareCoverCreds,
+  resolveCoverApiKey,
+} from "@/lib/cover-server";
 import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -31,10 +36,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (provider === "pollinations") {
-      const key = req.headers.get("x-pollinations-key")?.trim() || "";
+      const key = resolveCoverApiKey(
+        req.headers.get("x-pollinations-key")?.trim() || "",
+        "POLLINATIONS_API_KEY",
+      );
       if (!key) {
         return jsonError(
-          "未配置 Pollinations Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
+          isLocalCoverFallback()
+            ? "本地未配置 Pollinations：请填写页面 Key，或在 .env.local 增加 POLLINATIONS_API_KEY。"
+            : "未配置 Pollinations Key：请在生成页填写你自己的 API Key（登录后会同步到账号）。",
           401,
         );
       }
@@ -70,13 +80,16 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Cloudflare img2img — user credentials only (no shared site quota)
-    const accountId =
-      String(incoming.get("cloudflareAccountId") ?? "").trim() || "";
-    const token = req.headers.get("x-cloudflare-token")?.trim() || "";
+    // Cloudflare img2img — production uses the signed-in user's keys only
+    const { accountId, token } = resolveCloudflareCoverCreds({
+      accountId: String(incoming.get("cloudflareAccountId") ?? ""),
+      token: req.headers.get("x-cloudflare-token")?.trim() || "",
+    });
     if (!accountId || !token) {
       return jsonError(
-        "未配置生图 Key：请在生成页填写你自己的 Cloudflare Account ID 与 API Token（登录后会同步到账号）。",
+        isLocalCoverFallback()
+          ? "本地未配置生图：请在 .env.local 填写 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN。"
+          : "未配置生图 Key：请在生成页填写你自己的 Cloudflare Account ID 与 API Token（登录后会同步到账号）。",
         401,
       );
     }

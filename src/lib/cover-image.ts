@@ -1,8 +1,10 @@
 import type { CalendarPost } from "./year-calendar";
-import { pillarLabel } from "./persona";
 import { withAuthHeaders } from "@/lib/auth-fetch";
+import { fitCoverToNoteSize } from "@/lib/cover-compose";
+import { distillCoverVisualPrompt } from "@/lib/cover-scene";
+import type { CreatorPersona } from "@/lib/persona";
 
-/** Xiaohongshu-ish cover ratio (best-effort; Cloudflare flux is near-square) */
+/** Xiaohongshu 3:4. Cloudflare Flux ignores size; we crop after generation. */
 const WIDTH = 1080;
 const HEIGHT = 1440;
 const SIZE = `${WIDTH}x${HEIGHT}`;
@@ -17,23 +19,38 @@ export type CoverCredentials = {
   pollinationsKey?: string;
 };
 
-export function buildCoverPrompt(post: CalendarPost): string {
-  const mood =
-    post.format === "tips"
-      ? "clean editorial flat lay notebook checklist, minimal props"
-      : post.format === "emotion"
-        ? "soft natural window light candid lifestyle scene"
-        : "documentary style authentic lifestyle scene";
-
-  return [
-    "Xiaohongshu vertical cover 3:4",
-    `topic: ${post.titleHint}`,
-    `pillar: ${pillarLabel(post.pillar)}`,
-    mood,
-    "warm paper tones, soft coral accent optional",
-    "no purple neon, no text overlay, no watermark, no logo",
-    "tasteful, not stock-photo smile, only include a person if the topic clearly needs one",
-  ].join(", ");
+export function buildCoverPrompt(
+  post: CalendarPost,
+  options?: {
+    title?: string;
+    body?: string;
+    userPrompt?: string;
+    persona?: Pick<
+      CreatorPersona,
+      | "presetId"
+      | "contentMix"
+      | "name"
+      | "background"
+      | "audience"
+      | "stage"
+      | "voice"
+    >;
+  },
+): string {
+  return distillCoverVisualPrompt({
+    title: options?.title || post.titleHint,
+    body: options?.body,
+    angle: post.angle,
+    userPrompt: options?.userPrompt,
+    presetId: options?.persona?.presetId,
+    contentMix: options?.persona?.contentMix,
+    format: post.format,
+    personaName: options?.persona?.name,
+    background: options?.persona?.background,
+    audience: options?.persona?.audience,
+    stage: options?.persona?.stage,
+    voice: options?.persona?.voice,
+  });
 }
 
 export function buildImg2ImgPrompt(post: CalendarPost): string {
@@ -101,16 +118,40 @@ export async function generateCoverImage(
   options?: {
     seed?: number;
     prompt?: string;
-    referenceImageUrl?: string;
+    title?: string;
+    noteBody?: string;
+    userPrompt?: string;
+    persona?: Pick<
+      CreatorPersona,
+      | "presetId"
+      | "contentMix"
+      | "name"
+      | "background"
+      | "audience"
+      | "stage"
+      | "voice"
+    >;
     credentials?: CoverCredentials;
     signal?: AbortSignal;
   },
 ): Promise<string> {
   const creds = options?.credentials;
   const provider = creds?.provider ?? "cloudflare";
-  const forImg2Img = Boolean(options?.referenceImageUrl?.trim());
-  const prompt = resolvePrompt(post, options?.prompt, forImg2Img);
-  const seed = options?.seed ?? hashSeed(post.id + prompt.slice(0, 24));
+  const visual = distillCoverVisualPrompt({
+    title: options?.title || post.titleHint,
+    body: options?.noteBody,
+    angle: post.angle,
+    userPrompt: options?.userPrompt ?? options?.prompt,
+    presetId: options?.persona?.presetId,
+    contentMix: options?.persona?.contentMix,
+    format: post.format,
+    personaName: options?.persona?.name,
+    background: options?.persona?.background,
+    audience: options?.persona?.audience,
+    stage: options?.persona?.stage,
+    voice: options?.persona?.voice,
+  });
+  const seed = options?.seed ?? hashSeed(post.id + visual.slice(0, 24));
 
   const headers: HeadersInit = await withAuthHeaders({
     "Content-Type": "application/json",
@@ -132,7 +173,19 @@ export async function generateCoverImage(
     method: "POST",
     headers,
     body: JSON.stringify({
-      prompt,
+      prompt: visual,
+      title: options?.title || post.titleHint,
+      noteBody: options?.noteBody,
+      angle: post.angle,
+      userPrompt: options?.userPrompt ?? options?.prompt,
+      presetId: options?.persona?.presetId,
+      contentMix: options?.persona?.contentMix,
+      format: post.format,
+      personaName: options?.persona?.name,
+      background: options?.persona?.background,
+      audience: options?.persona?.audience,
+      stage: options?.persona?.stage,
+      voice: options?.persona?.voice,
       provider,
       size: SIZE,
       seed,
@@ -144,14 +197,11 @@ export async function generateCoverImage(
           : provider === "pollinations"
             ? creds?.pollinationsKey
             : undefined,
-      ...(forImg2Img
-        ? { image: options!.referenceImageUrl!.trim() }
-        : {}),
     }),
     signal: options?.signal,
   });
 
-  return parseImageResponse(res);
+  return fitCoverToNoteSize(await parseImageResponse(res));
 }
 
 /**
@@ -200,7 +250,7 @@ export async function editCoverFromFile(
     body: form,
     signal: options?.signal,
   });
-  return parseImageResponse(res);
+  return fitCoverToNoteSize(await parseImageResponse(res));
 }
 
 export async function compressImageFile(
