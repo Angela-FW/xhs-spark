@@ -37,6 +37,30 @@ export async function fetchCloudStateWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error("cloud pull failed");
 }
 
+export function subscribePlannerState(
+  userId: string,
+  onChange: () => void,
+): () => void {
+  const sb = getSupabaseBrowser();
+  if (!sb) return () => {};
+  const channel = sb
+    .channel(`planner_state:${userId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "planner_state",
+        filter: `user_id=eq.${userId}`,
+      },
+      () => onChange(),
+    )
+    .subscribe();
+  return () => {
+    void sb.removeChannel(channel);
+  };
+}
+
 export async function saveCloudState(
   userId: string,
   state: AppState,

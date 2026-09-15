@@ -14,9 +14,13 @@ import {
   fetchCloudCoverKeys,
   saveCloudCoverKeys,
 } from "@/lib/cloud-cover-keys";
-import { fetchCloudStateWithRetry, saveCloudState } from "@/lib/cloud-state";
+import {
+  fetchCloudStateWithRetry,
+  saveCloudState,
+  subscribePlannerState,
+} from "@/lib/cloud-state";
 import { loadCoverKeys, mergeCoverKeys, saveCoverKeys } from "@/lib/cover-keys";
-import { resolvePlannerSync } from "@/lib/planner-sync";
+import { resolvePlannerSync, syncFingerprint } from "@/lib/planner-sync";
 import {
   importState,
   plannerHasContent,
@@ -150,6 +154,9 @@ function CloudSyncBridge({
   const pulling = useRef(false);
   const syncRun = useRef(0);
   const localRef = useRef(state);
+  const lastPushedFp = useRef("");
+  const suppressPushUntil = useRef(0);
+  const ignoreReloadUntil = useRef(0);
   localRef.current = state;
 
   useEffect(() => {
@@ -181,12 +188,34 @@ function CloudSyncBridge({
         const remoteState = remote?.data
           ? importState(JSON.stringify(remote.data))
           : null;
-        const plan = resolvePlannerSync(local, remoteState);
-        if (plan.applyRemote) {
-          importJson(JSON.stringify(plan.applyRemote));
+        const remoteFp = remoteState ? syncFingerprint(remoteState) : "";
+
+        if (opts?.quiet) {
+          if (
+            remoteFp &&
+            lastPushedFp.current &&
+            remoteFp !== lastPushedFp.current &&
+            Date.now() >= ignoreReloadUntil.current
+          ) {
+            window.location.reload();
+            return;
+          }
+          pullOk = true;
+          return;
         }
-        if (plan.uploadLocal) {
-          await saveCloudState(userId, syncActiveWorkspace(localRef.current));
+
+        const plan = resolvePlannerSync(local, remoteState);
+        if (plan.applyLocal) {
+          suppressPushUntil.current = Date.now() + 2000;
+          lastPushedFp.current = syncFingerprint(plan.applyLocal);
+          importJson(JSON.stringify(plan.applyLocal), { force: true });
+        } else {
+          lastPushedFp.current = remoteFp || syncFingerprint(plan.upload ?? local);
+        }
+        if (plan.upload) {
+          ignoreReloadUntil.current = Date.now() + 5000;
+          lastPushedFp.current = syncFingerprint(plan.upload);
+          await saveCloudState(userId, plan.upload);
         }
         pullOk = true;
       } catch (err) {
@@ -204,39 +233,42 @@ function CloudSyncBridge({
 
     void syncFromCloud();
 
-    const onCleared = () => {
+    const pullQuiet = () => {
+      if (cancelled || pulling.current) return;
       void syncFromCloud({ quiet: true });
     };
-    window.addEventListener(PLANNER_STORAGE_CLEARED_EVENT, onCleared);
-
-    const retryIfLocalEmpty = () => {
-      if (cancelled || pulling.current) return;
-      if (plannerHasContent(localRef.current)) return;
-      void syncFromCloud({ quiet: true });
+    const onCleared = () => {
+      window.location.reload();
     };
     const onVis = () => {
-      if (document.visibilityState === "visible") retryIfLocalEmpty();
+      if (document.visibilityState === "visible") pullQuiet();
     };
-    window.addEventListener("focus", retryIfLocalEmpty);
+    window.addEventListener(PLANNER_STORAGE_CLEARED_EVENT, onCleared);
+    window.addEventListener("focus", pullQuiet);
     document.addEventListener("visibilitychange", onVis);
-    const poll = window.setInterval(retryIfLocalEmpty, 8000);
-    const stopPoll = window.setTimeout(() => window.clearInterval(poll), 120_000);
+    const poll = window.setInterval(pullQuiet, 15_000);
+    const unsubscribe = subscribePlannerState(userId, pullQuiet);
 
     return () => {
       cancelled = true;
+      unsubscribe();
       window.removeEventListener(PLANNER_STORAGE_CLEARED_EVENT, onCleared);
-      window.removeEventListener("focus", retryIfLocalEmpty);
+      window.removeEventListener("focus", pullQuiet);
       document.removeEventListener("visibilitychange", onVis);
       window.clearInterval(poll);
-      window.clearTimeout(stopPoll);
     };
   }, [ready, authReady, user?.id, importJson, onGateReady]);
 
   useEffect(() => {
     if (!ready || !user || !cloudReady || pulling.current) return;
+    if (Date.now() < suppressPushUntil.current) return;
     const next = syncActiveWorkspace(state);
     if (!plannerHasContent(next)) return;
+    const fp = syncFingerprint(next);
+    if (fp === lastPushedFp.current) return;
     const timer = window.setTimeout(() => {
+      ignoreReloadUntil.current = Date.now() + 5000;
+      lastPushedFp.current = fp;
       void saveCloudState(user.id, next).catch((err) => {
         console.error("cloud save failed", err);
       });
@@ -254,19 +286,31 @@ function CoverKeysSyncBridge() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    (async () => {
+
+    const userId = user.id;
+
+    async function syncKeys() {
       try {
-        const remote = await fetchCloudCoverKeys(user.id);
+        const remote = await fetchCloudCoverKeys(userId);
         if (cancelled) return;
         const plan = mergeCoverKeys(loadCoverKeys(), remote);
         if (plan.writeLocal) saveCoverKeys(plan.keys);
-        if (plan.writeRemote) await saveCloudCoverKeys(user.id, plan.keys);
+        if (plan.writeRemote) await saveCloudCoverKeys(userId, plan.keys);
       } catch (err) {
         console.error("cover keys sync failed", err);
       }
-    })();
+    }
+
+    void syncKeys();
+    const onVis = () => {
+      if (document.visibilityState === "visible") void syncKeys();
+    };
+    window.addEventListener("focus", syncKeys);
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", syncKeys);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [user?.id]);
 

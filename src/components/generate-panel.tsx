@@ -22,10 +22,17 @@ import {
   usesLocalCoverFallback,
 } from "@/lib/cover-keys";
 import {
+  composeTypographicCover,
   extractCoverTextRequest,
   overlayCoverText,
+  parseCoverBrief,
+  shouldUseLocalTypographicCover,
 } from "@/lib/cover-compose";
-import { pillarLabel, phaseLabel } from "@/lib/persona";
+import {
+  coverPromptPlaceholderForPersona,
+  pillarLabel,
+  phaseLabel,
+} from "@/lib/persona";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -76,7 +83,13 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const bodyReqId = useRef(0);
   const requireAuthRef = useRef(requireAuth);
+  const draftExtraRef = useRef(draftExtra);
+  const noteRef = useRef(note);
+  const insightsRef = useRef(state.insights);
   requireAuthRef.current = requireAuth;
+  draftExtraRef.current = draftExtra;
+  noteRef.current = note;
+  insightsRef.current = state.insights;
   const hasCoverKey = hasUsableCoverKeys();
 
   useEffect(() => {
@@ -168,6 +181,11 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
     const persona = state.persona;
     const extra = post.draft?.extra ?? "";
     const postRef = post;
+    const insightFacts = state.insights.map((i) => ({
+      id: i.id,
+      raw: i.raw,
+      polished: i.polished,
+    }));
 
     void (async () => {
       if (!(await requireAuthRef.current())) {
@@ -181,10 +199,12 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
         const { note: next, result } = await generateNoteBodyForPost(
           postRef,
           persona,
-          extra,
+          draftExtraRef.current || extra,
           title,
           0,
           keepTitles,
+          undefined,
+          insightFacts,
         );
         if (reqId !== bodyReqId.current) return;
         setNote(next);
@@ -239,9 +259,30 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
     setTitleIndex(index);
   }
 
+  function updateBody(value: string) {
+    setNote((prev) => (prev ? { ...prev, body: value } : prev));
+  }
+
   async function applyBodyForTitle(title: string, nextBodySeed: number) {
     if (!post) return;
     if (!(await requireAuth())) return;
+    const extra = draftExtraRef.current;
+    const currentNote = noteRef.current;
+    const previousBody = currentNote?.body?.trim() || undefined;
+    const insightFacts = insightsRef.current.map((i) => ({
+      id: i.id,
+      raw: i.raw,
+      polished: i.polished,
+    }));
+    if (currentNote) {
+      saveDraft(post.id, {
+        titles: currentNote.titles,
+        titleIndex,
+        body: currentNote.body,
+        tags: currentNote.tags,
+        extra,
+      });
+    }
     const reqId = ++bodyReqId.current;
     setBodyBusy(true);
     setBodyHint("正在生成正文…");
@@ -250,14 +291,23 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       const { note: next, result } = await generateNoteBodyForPost(
         post,
         state.persona,
-        draftExtra,
+        extra,
         title,
         nextBodySeed,
-        note?.titles,
+        currentNote?.titles,
+        previousBody,
+        insightFacts,
       );
       if (reqId !== bodyReqId.current) return;
       setNote(next);
       setJustGenerated(true);
+      saveDraft(post.id, {
+        titles: next.titles,
+        titleIndex,
+        body: next.body,
+        tags: next.tags,
+        extra,
+      });
       if (result.source === "ai") {
         setBodyHint(
           result.attempts > 1
@@ -331,6 +381,20 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       selectedTitle || post.titleHint,
     );
 
+    if (shouldUseLocalTypographicCover(userPrompt)) {
+      setBusy(true);
+      try {
+        const url = await composeTypographicCover(parseCoverBrief(userPrompt));
+        if (resultUrl?.startsWith("blob:")) URL.revokeObjectURL(resultUrl);
+        setResultUrl(url);
+      } catch (err) {
+        setGenError(err instanceof Error ? err.message : "封面排版失败");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     const creds = toCoverCredentials(loadCoverKeys());
     if (!hasUsableCoverKeys(creds) && !localEnvReady) {
       setPendingCoverSeed(nextSeed ?? null);
@@ -345,9 +409,9 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
     try {
       let url = await generateCoverImage(post, {
         seed: useSeed,
-        title: selectedTitle || post.titleHint,
-        noteBody: note?.body,
-        userPrompt,
+        title: userPrompt ? undefined : (selectedTitle || post.titleHint),
+        noteBody: userPrompt ? undefined : note?.body,
+        userPrompt: userPrompt || undefined,
         persona: state.persona,
         credentials: creds,
       });
@@ -550,11 +614,11 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
             id="extra"
             value={draftExtra}
             onChange={(e) => setDraftExtra(e.target.value)}
-            className="min-h-24 bg-white/80"
-            placeholder="这周真实发生了什么，写完后点下方按钮，会写进正文"
+            className="min-h-32 bg-white/80"
+            placeholder="越具体越好：离职第几天、投递/已读不回、猎头、正在做的项目名和进展。写完后点下方按钮，会写进正文。"
           />
           <p className="text-xs text-[var(--ink-soft)]">
-            填写不会自动生效，需点击「生成正文」才会进入文案。
+            填写不会自动生效，需点击「生成正文」才会进入文案。事实写得越全，正文越像你自己写的。
           </p>
         </div>
 
@@ -585,16 +649,26 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
           <p className="mb-2 text-xs text-[var(--coral)]">
             已按当前标题重写正文（含你的补充）
           </p>
-        ) : null}
+        ) : (
+          <p className="mb-2 text-xs text-[var(--ink-soft)]">
+            可直接改字，关闭时会保存。
+          </p>
+        )}
         {bodyBusy && !note.body ? (
           <div className="rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink-soft)]">
             模型正在写正文，稍等几秒…
           </div>
         ) : (
-          <pre className="whitespace-pre-wrap rounded-xl bg-white/70 p-4 text-sm leading-7 text-[var(--ink)]">
-            {note.body}
-          </pre>
-        )}        <div className="mt-3 flex flex-wrap gap-2">
+          <Textarea
+            id="note-body"
+            value={note.body}
+            onChange={(e) => updateBody(e.target.value)}
+            disabled={bodyBusy}
+            className="min-h-48 bg-white/80 p-4 text-sm leading-7"
+            placeholder="正文会出现在这里，也可以自己改。"
+          />
+        )}
+        <div className="mt-3 flex flex-wrap gap-2">
           {note.tags.map((tag) => (
             <span
               key={tag}
@@ -655,8 +729,11 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
             value={coverPrompt}
             onChange={(e) => setCoverPrompt(e.target.value)}
             className="min-h-32 bg-white"
-            placeholder="可留空。也可自己补充场景、构图、光线。要在图上加字可写：内容：五分钟通勤妆，或写上「通勤妆」。"
+            placeholder={coverPromptPlaceholderForPersona(state.persona)}
           />
+          <p className="text-xs text-[var(--ink-soft)]">
+            填了只按这段出图；留空才用当前标题和正文。
+          </p>
         </div>
 
         <Button
@@ -696,14 +773,6 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       </div>
 
       <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 px-6"
-          onClick={() => setPostStatus(post.id, "drafted")}
-        >
-          标为已起草
-        </Button>
         <Button
           type="button"
           className="h-11 bg-[var(--coral)] px-6 text-white hover:bg-[var(--coral-deep)]"

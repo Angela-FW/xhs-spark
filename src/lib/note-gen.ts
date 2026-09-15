@@ -95,10 +95,12 @@ export function generateTitleCandidates(
 }
 
 function materialBits(post: CalendarPost, extraNote: string): string[] {
-  const fromMats = post.materials.map((m) => m.polished).filter(Boolean);
+  const fromMats = post.materials
+    .map((m) => (m.polished || m.summary || "").trim())
+    .filter(Boolean);
   const lines: string[] = [];
-  if (extraNote.trim()) lines.push(extraNote.trim().replace(/\s+/g, " "));
-  for (const m of fromMats.slice(0, 3)) {
+  if (extraNote.trim()) lines.push(extraNote.trim());
+  for (const m of fromMats.slice(0, 6)) {
     lines.push(m.replace(/\s+/g, " ").trim());
   }
   return lines;
@@ -123,7 +125,7 @@ function stripPeriod(text: string): string {
 }
 
 /** Turn planner jargon into speakable Xiaohongshu lines. */
-function humanAngle(angle: string): string {
+export function humanAngle(angle: string): string {
   let text = angle.trim();
   text = text
     .replace(/^现在时开场[：:]*/, "")
@@ -169,9 +171,9 @@ function humanStage(stage: string): string {
 function sceneByPillar(post: CalendarPost, seed: number): string {
   const scenes: Record<string, string[]> = {
     restart: [
-      "电脑一关，房间忽然安静得过分。",
-      "那封邮件发出去之后，我坐了很久。",
-      "那天没人通知我「你要开始新生活了」。",
+      "离职这几天，作息还在往回找。",
+      "公告发出去之后，当天该做的事我还是做完了。",
+      "空档期开始了，没有谁来宣布「你要重启了」。",
     ],
     "age-edu": [
       "简历上那两个字，我又看了两遍。",
@@ -189,7 +191,7 @@ function sceneByPillar(post: CalendarPost, seed: number): string {
       "结束后走路回家，脑子还在回放某一句。",
     ],
     rejection: [
-      "「已读不回」弹出的瞬间，胃先紧了一下。",
+      "已读不回还是会出现，胃还是会紧一下。",
       "拒信很短，短到我连生气都来不及。",
       "刷新到第三次，我把手机扣过去了。",
     ],
@@ -293,10 +295,9 @@ function buildHook(title: string, post: CalendarPost, seed: number): string {
   }
   return pick(
     [
-      `${t}。\n我是卡过之后，才敢这么写的。`,
-      `先说一句可能不太好听的：\n${t}，真的不是靠「再拼一把」就能过。`,
-      `关于「${t}」，\n我想把最真实的那几天写清楚。`,
-      `${t}。\n这篇不装励志，只写我实际怎么走过来的。`,
+      `${t}。\n先把这几天真实发生的写下来。`,
+      `关于「${t}」，\n我不想写成一篇小作文。`,
+      `${t}。\n这篇只记进度，不装励志。`,
     ],
     seed,
   );

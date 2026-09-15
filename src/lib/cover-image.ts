@@ -127,20 +127,23 @@ export async function generateCoverImage(
   },
 ): Promise<string> {
   const creds = options?.credentials;
-  const visual = distillCoverVisualPrompt({
-    title: options?.title || post.titleHint,
-    body: options?.noteBody,
-    angle: post.angle,
-    userPrompt: options?.userPrompt ?? options?.prompt,
-    presetId: options?.persona?.presetId,
-    contentMix: options?.persona?.contentMix,
-    format: post.format,
-    personaName: options?.persona?.name,
-    background: options?.persona?.background,
-    audience: options?.persona?.audience,
-    stage: options?.persona?.stage,
-    voice: options?.persona?.voice,
-  });
+  const typed = (options?.userPrompt ?? options?.prompt ?? "").trim();
+  const visual = typed
+    ? typed
+    : distillCoverVisualPrompt({
+        title: options?.title || post.titleHint,
+        body: options?.noteBody,
+        angle: post.angle,
+        userPrompt: "",
+        presetId: options?.persona?.presetId,
+        contentMix: options?.persona?.contentMix,
+        format: post.format,
+        personaName: options?.persona?.name,
+        background: options?.persona?.background,
+        audience: options?.persona?.audience,
+        stage: options?.persona?.stage,
+        voice: options?.persona?.voice,
+      });
   const seed = options?.seed ?? hashSeed(post.id + visual.slice(0, 24));
 
   const headers: HeadersInit = await withAuthHeaders({
@@ -156,10 +159,10 @@ export async function generateCoverImage(
     headers,
     body: JSON.stringify({
       prompt: visual,
-      title: options?.title || post.titleHint,
-      noteBody: options?.noteBody,
-      angle: post.angle,
-      userPrompt: options?.userPrompt ?? options?.prompt,
+      title: typed ? undefined : (options?.title || post.titleHint),
+      noteBody: typed ? undefined : options?.noteBody,
+      angle: typed ? undefined : post.angle,
+      userPrompt: typed || undefined,
       presetId: options?.persona?.presetId,
       contentMix: options?.persona?.contentMix,
       format: post.format,

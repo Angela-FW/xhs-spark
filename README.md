@@ -7,7 +7,7 @@
 - **新用户**：先选起号方向（家居 / 美妆 / 汽车 / 离职 / 职场日常 / 生活记录）
 - **日历首页**：默认展示未来 **4 周**路线，可往后翻继续生成
 - **多人设**：每人设独立笔记库；顶栏可切换
-- **生文**：用站点共用的 Cloudflare Workers AI（服务端 `CLOUDFLARE_*`），用户不用配 Key
+- **生文**：站点共用 Cloudflare Workers AI（GLM-4.7-Flash，失败时回退 Qwen3-30B；服务端 `CLOUDFLARE_*`），用户不用配 Key
 - **生图**：每人自备 [硅基流动](https://cloud.siliconflow.cn) Key（免费模型 Kolors，需实名）；登录后同步到账号，**不占用别人额度**
 - **点「生成」**：才弹出登录 / 注册（保护额度，并开启云端同步）
 
@@ -48,7 +48,7 @@ npm run dev -- --port 43123 --hostname 127.0.0.1
    - 得到公网链接；未登录可浏览，点「生成」需注册
 
 3. **文生 vs 生图 Key**
-   - 文案 / 周选题：在 Netlify / `.env.local` 配置站点共用的 `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`
+   - 文案 / 周选题：在 Netlify / `.env.local` 配置站点共用的 `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`（模型为 GLM-4.7-Flash，失败回退 Qwen3-30B）
    - 生图：每人自备 [硅基流动](https://cloud.siliconflow.cn) API Key（Kolors 免费，需实名）；注册弹窗或生成页填写，登录后写入 Supabase
    - 站点**不会**用共享服务端 Key 代付生图额度。本地调试可把你自己的 Key 写在 `.env.local` 的 `SILICONFLOW_API_KEY`，仅本机有效
 

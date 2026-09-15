@@ -15,7 +15,11 @@ export type CoverTextRequest = {
 };
 
 const WANT_TEXT_RE =
-  /加文字|配文字|叠字|叠文字|封面写|写上字|带字|放文字|加上文字|标题文字|写上标题|加上标题|用标题|把标题|写上「|写上“|写上"|文字\s*[:：]|内容\s*[:：]|文案\s*[:：]/;
+  /加文字|配文字|叠字|叠文字|封面写|写上字|带字|放文字|加上文字|图片上文字|图上文字|标题文字|写上标题|加上标题|用标题|把标题|写上「|写上“|写上"|文字\s*[:：]|内容\s*[:：]|文案\s*[:：]/;
+
+const PLAIN_BG_RE = /素色|纯色|纯背景|留白|扁平|信息图|数据卡片|卡片式/;
+const PHOTO_SCENE_RE =
+  /人像|自拍|写真|摄影|照片|实拍|静物|桌面|咖啡|窗光|房间|厨房|妆面|口红|通勤|地铁/;
 
 /** Only when the user prompt explicitly asks to put words on the cover. */
 export function extractCoverTextRequest(
@@ -87,15 +91,41 @@ export function parseCoverBrief(prompt: string): CoverBrief {
     matchField(raw, "文案") ||
     matchField(raw, "文字");
   const style = matchField(raw, "风格") || matchField(raw, "样式") || "";
-  const color = matchField(raw, "颜色") || matchField(raw, "配色") || "";
+  const color =
+    matchField(raw, "颜色") || matchField(raw, "配色") || inferColorLabel(raw);
   const textReq = extractCoverTextRequest(raw);
+  const contentItems = splitItems(content);
   return {
     raw,
-    contentItems: splitItems(content),
+    contentItems: contentItems.length > 0 ? contentItems : textReq.lines,
     style,
     color,
     wantsText: textReq.wantsText,
   };
+}
+
+/**
+ * Solid-color / infographic covers: typeset locally.
+ * Kolors cannot paint accurate Chinese, and sending "沟通356" upstream often 500s.
+ */
+export function shouldUseLocalTypographicCover(prompt: string): boolean {
+  const brief = parseCoverBrief(prompt);
+  if (!brief.wantsText || brief.contentItems.length === 0) return false;
+  const raw = brief.raw;
+  const plain = PLAIN_BG_RE.test(raw) || /背景/.test(raw);
+  const photo = PHOTO_SCENE_RE.test(raw);
+  if (plain && !photo) return true;
+  return PLAIN_BG_RE.test(raw);
+}
+
+function inferColorLabel(raw: string): string {
+  if (/浅紫|淡紫|薰衣草|紫/.test(raw)) return "淡紫";
+  if (/粉|玫瑰/.test(raw)) return "粉";
+  if (/蓝/.test(raw)) return "蓝";
+  if (/珊瑚|橙|暖/.test(raw)) return "暖橙";
+  if (/绿/.test(raw)) return "绿";
+  if (/米白|米色|奶油|纸色/.test(raw)) return "米色";
+  return "";
 }
 
 function matchField(text: string, label: string): string {
@@ -141,12 +171,21 @@ function parseColor(colorField: string, styleField: string): {
   card: string;
 } {
   const blob = `${colorField} ${styleField}`;
-  if (/浅紫|淡紫|紫/.test(blob)) {
+  if (/浅紫|淡紫|薰衣草|紫/.test(blob)) {
     return {
       bg0: "#f3eef8",
       bg1: "#e4d7f0",
       ink: "#3d2a52",
       accent: "#8b6bb0",
+      card: "rgba(255,255,255,0.72)",
+    };
+  }
+  if (/粉|玫瑰/.test(blob)) {
+    return {
+      bg0: "#f8eef3",
+      bg1: "#f0d9e4",
+      ink: "#4a2a38",
+      accent: "#c46b8a",
       card: "rgba(255,255,255,0.72)",
     };
   }
@@ -185,6 +224,27 @@ function parseColor(colorField: string, styleField: string): {
     accent: "#c2714f",
     card: "rgba(255,255,255,0.75)",
   };
+}
+
+/** Typographic covers honor 居中 / 靠上 / 靠下; default to vertical center. */
+export function inferCoverBlockAlign(raw: string): "top" | "center" | "bottom" {
+  const t = raw.replace(/\s+/g, "");
+  if (/不居中/.test(t)) return "top";
+  if (/居中|垂直居中|上下居中|中间/.test(t)) return "center";
+  if (/靠下|底部|底端|下方对齐/.test(t)) return "bottom";
+  if (/靠上|顶部|顶端|上方对齐/.test(t)) return "top";
+  return "center";
+}
+
+function blockStartY(
+  height: number,
+  pad: number,
+  blockH: number,
+  align: "top" | "center" | "bottom",
+): number {
+  if (align === "center") return Math.max(pad, Math.round((height - blockH) / 2));
+  if (align === "bottom") return Math.max(pad, height - pad - blockH);
+  return pad + 48;
 }
 
 function splitLabelValue(item: string): { label: string; value: string } {
@@ -234,27 +294,49 @@ export async function composeTypographicCover(
   ctx.fill();
 
   const pad = 72;
-  let y = pad + 48;
+  const fontStack =
+    '"PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif';
+  const title = options?.title?.trim() ?? "";
+  ctx.font = `600 52px ${fontStack}`;
+  const titleLines = title ? wrapLines(ctx, title, width - pad * 2).slice(0, 3) : [];
+  const titleLineH = 64;
+  const titleGap = titleLines.length ? 36 : 0;
 
-  if (options?.title?.trim()) {
-    ctx.fillStyle = colors.ink;
-    ctx.font =
-      '600 52px "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif';
-    y = wrapText(ctx, options.title.trim(), pad, y, width - pad * 2, 64) + 36;
-  }
-
-  const items =
+  const items = (
     brief.contentItems.length > 0
       ? brief.contentItems
       : brief.raw
           .split(/\n+/)
           .map((s) => s.trim())
           .filter((s) => s && !/^(内容|风格|颜色|画面)\s*[:：]/.test(s))
-          .slice(0, 6);
+  ).slice(0, 6);
 
   const cardH = 148;
   const gap = 28;
-  for (const item of items) {
+  const titleH = titleLines.length * titleLineH + titleGap;
+  const maxCards = Math.max(
+    1,
+    Math.floor((height - pad * 2 - titleH + gap) / (cardH + gap)),
+  );
+  const visible = items.slice(0, maxCards);
+  const cardsH =
+    visible.length * cardH + Math.max(0, visible.length - 1) * gap;
+  const blockH = titleH + cardsH;
+  let y = blockStartY(height, pad, blockH, inferCoverBlockAlign(brief.raw));
+
+  if (titleLines.length) {
+    ctx.fillStyle = colors.ink;
+    ctx.textBaseline = "top";
+    ctx.font = `600 52px ${fontStack}`;
+    for (const line of titleLines) {
+      ctx.fillText(line, pad, y);
+      y += titleLineH;
+    }
+    y += titleGap;
+    ctx.textBaseline = "alphabetic";
+  }
+
+  for (const item of visible) {
     const { label, value } = splitLabelValue(item);
     roundRect(ctx, pad, y, width - pad * 2, cardH, 28);
     ctx.fillStyle = colors.card;
@@ -277,7 +359,6 @@ export async function composeTypographicCover(
     }
 
     y += cardH + gap;
-    if (y > height - pad - 40) break;
   }
 
   const blob = await new Promise<Blob | null>((resolve) =>
@@ -437,32 +518,6 @@ function wrapLines(
   }
   if (line) lines.push(line);
   return lines;
-}
-
-function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-): number {
-  let line = "";
-  for (const ch of text) {
-    const test = line + ch;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      ctx.fillText(line, x, y);
-      line = ch;
-      y += lineHeight;
-    } else {
-      line = test;
-    }
-  }
-  if (line) {
-    ctx.fillText(line, x, y);
-    y += lineHeight;
-  }
-  return y;
 }
 
 function roundRect(

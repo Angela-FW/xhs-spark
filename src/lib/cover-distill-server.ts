@@ -1,13 +1,5 @@
+import { hasCfTextCreds, runCfText } from "@/lib/cf-text";
 import type { CoverDistillInput } from "@/lib/cover-scene";
-
-const TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
-
-function textCfCreds(): { id: string; token: string } {
-  return {
-    id: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "",
-    token: process.env.CLOUDFLARE_API_TOKEN?.trim() || "",
-  };
-}
 
 function clip(value: string | undefined, max: number): string {
   return (value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -39,8 +31,7 @@ function sanitizeVisualPrompt(raw: string): string {
 export async function distillCoverPromptWithLlm(
   input: CoverDistillInput,
 ): Promise<string | null> {
-  const { id, token } = textCfCreds();
-  if (!id || !token) return null;
+  if (!hasCfTextCreds()) return null;
 
   const title = clip(input.title, 80);
   const body = clip(input.body, 420);
@@ -65,41 +56,23 @@ export async function distillCoverPromptWithLlm(
     title ? `标题：${title}` : "",
     input.angle ? `角度：${clip(input.angle, 80)}` : "",
     body ? `正文：${body}` : "",
-    input.userPrompt ? `用户补充：${clip(input.userPrompt, 200)}` : "",
     "中文画面提示词：",
   ]
     .filter(Boolean)
     .join("\n");
 
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${id}/ai/run/${TEXT_MODEL}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 12000);
 
   try {
-    const upstream = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        max_tokens: 180,
-        temperature: 0.2,
-      }),
+    const { text } = await runCfText({
+      system,
+      user,
+      maxTokens: 180,
+      temperature: 0.2,
       signal: controller.signal,
     });
-
-    const data = (await upstream.json().catch(() => null)) as {
-      success?: boolean;
-      result?: { response?: string };
-    } | null;
-
-    if (!upstream.ok || !data?.success) return null;
-    const cleaned = sanitizeVisualPrompt(String(data.result?.response || ""));
+    const cleaned = sanitizeVisualPrompt(text);
     if (!cleaned) return null;
     return cleaned;
   } catch {

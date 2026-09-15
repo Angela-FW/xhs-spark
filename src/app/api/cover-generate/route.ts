@@ -69,9 +69,17 @@ export async function POST(req: NextRequest) {
       stage: body.stage,
       voice: body.voice,
     };
-    const fallback = resolveCoverVisualPrompt(distillInput);
-    const translated = await distillCoverPromptWithLlm(distillInput);
-    const prompt = buildCoverImagePrompt(translated || fallback);
+    const typed = (body.userPrompt || "").trim();
+    let prompt: string;
+    if (typed) {
+      // User box is the only source — do not distill title/body into the image.
+      prompt = buildCoverImagePrompt(typed);
+    } else {
+      const topicInput = { ...distillInput, userPrompt: "" };
+      const fallback = resolveCoverVisualPrompt(topicInput);
+      const translated = await distillCoverPromptWithLlm(topicInput);
+      prompt = buildCoverImagePrompt(translated || fallback);
+    }
     if (!prompt) return jsonError("需要 prompt", 400);
 
     const apiKey = resolveSiliconflowKey(
@@ -82,6 +90,7 @@ export async function POST(req: NextRequest) {
     const seed = Number(body.seed ?? Date.now() % 100000) || 1;
     const result = await runKolors({ apiKey, prompt, seed });
     if (!result.ok) {
+      console.error("Kolors failed", result.status, result.detail.slice(0, 200));
       return jsonError(kolorsErrorMessage(result.status, result.detail), result.status, result.detail);
     }
     return asImageJson(result);

@@ -85,7 +85,7 @@ type StoreApi = {
   generateMoreWeek: () => void;
   deletePost: (postId: string) => void;
   exportJson: () => string;
-  importJson: (json: string) => void;
+  importJson: (json: string, opts?: { force?: boolean }) => void;
   resetAll: () => void;
 };
 
@@ -370,8 +370,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const exportJson = useCallback(() => exportState(state), [state]);
 
-  const importJson = useCallback((json: string) => {
+  const importJson = useCallback((json: string, opts?: { force?: boolean }) => {
     const next = importState(json);
+    if (opts?.force) {
+      if (!plannerHasContent(next)) clearPlannerStorage();
+      setState(next);
+      return;
+    }
     setState((s) =>
       !plannerHasContent(next) && plannerHasContent(s) ? s : next,
     );

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  CF_TEXT_MISSING_CREDS,
+  hasCfTextCreds,
+  runCfText,
+} from "@/lib/cf-text";
 import { requireUserForAi } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
-
-const MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
 type TopicIn = {
   id: string;
@@ -24,14 +27,6 @@ type Body = {
   posts?: TopicIn[];
   usedTitles?: string[];
 };
-
-/** Text AI always uses the shared site Cloudflare Workers AI credentials. */
-function resolveTextCfCreds(): { id: string; token: string } {
-  return {
-    id: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "",
-    token: process.env.CLOUDFLARE_API_TOKEN?.trim() || "",
-  };
-}
 
 function extractJsonArray(text: string): unknown {
   const trimmed = text.trim();
@@ -58,15 +53,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { id, token } = resolveTextCfCreds();
-  if (!id || !token) {
-    return NextResponse.json(
-      {
-        error:
-          "服务端未配置文生模型（缺少 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN）",
-      },
-      { status: 503 },
-    );
+  if (!hasCfTextCreds()) {
+    return NextResponse.json({ error: CF_TEXT_MISSING_CREDS }, { status: 503 });
   }
 
   const posts = Array.isArray(input.posts) ? input.posts.slice(0, 4) : [];
@@ -97,7 +85,7 @@ export async function POST(req: Request) {
     persona.age ? `年龄：${persona.age}` : "",
     persona.background ? `背景：${persona.background}` : "",
     persona.stage ? `阶段：${persona.stage}` : "",
-    persona.voice ? `语气：${String(persona.voice).slice(0, 80)}` : "",
+    persona.voice ? `语气：${String(persona.voice).slice(0, 120)}` : "",
     persona.audience ? `读者：${persona.audience}` : "",
     usedTitles.length
       ? `已用标题（勿重复）：${usedTitles.join(" ｜ ")}`
@@ -112,79 +100,61 @@ export async function POST(req: Request) {
     .filter(Boolean)
     .join("\n");
 
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${id}/ai/run/${MODEL}`;
-  const upstream = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      max_tokens: 900,
+  try {
+    const { text, model } = await runCfText({
+      system,
+      user,
+      maxTokens: 900,
       temperature: 0.75,
-    }),
-  });
+    });
 
-  const data = (await upstream.json().catch(() => null)) as {
-    success?: boolean;
-    result?: { response?: string };
-    errors?: Array<{ message?: string }>;
-  } | null;
+    let parsed: unknown;
+    try {
+      parsed = extractJsonArray(text);
+    } catch {
+      return NextResponse.json({ error: "模型返回无法解析" }, { status: 502 });
+    }
 
-  if (!upstream.ok || !data?.success) {
-    const msg =
-      data?.errors?.[0]?.message || `Cloudflare text API ${upstream.status}`;
+    if (!Array.isArray(parsed)) {
+      return NextResponse.json({ error: "模型返回不是数组" }, { status: 502 });
+    }
+
+    const byId = new Map<string, { titleHint: string; angle: string }>();
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as {
+        id?: string;
+        titleHint?: string;
+        title?: string;
+        angle?: string;
+      };
+      const topicId = String(row.id || "").trim();
+      const titleHint = String(row.titleHint || row.title || "")
+        .trim()
+        .slice(0, 40);
+      const angle = String(row.angle || "")
+        .trim()
+        .slice(0, 80);
+      if (!topicId || !titleHint || !angle) continue;
+      byId.set(topicId, { titleHint, angle });
+    }
+
+    const topics = posts.map((p) => {
+      const hit = byId.get(p.id);
+      return {
+        id: p.id,
+        titleHint: hit?.titleHint || "",
+        angle: hit?.angle || "",
+      };
+    });
+
+    if (!topics.some((t) => t.titleHint && t.angle)) {
+      return NextResponse.json({ error: "模型未生成有效选题" }, { status: 502 });
+    }
+
+    return NextResponse.json({ topics, model });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "选题失败";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
-
-  const raw = String(data.result?.response || "").trim();
-  let parsed: unknown;
-  try {
-    parsed = extractJsonArray(raw);
-  } catch {
-    return NextResponse.json({ error: "模型返回无法解析" }, { status: 502 });
-  }
-
-  if (!Array.isArray(parsed)) {
-    return NextResponse.json({ error: "模型返回不是数组" }, { status: 502 });
-  }
-
-  const byId = new Map<string, { titleHint: string; angle: string }>();
-  for (const item of parsed) {
-    if (!item || typeof item !== "object") continue;
-    const row = item as {
-      id?: string;
-      titleHint?: string;
-      title?: string;
-      angle?: string;
-    };
-    const topicId = String(row.id || "").trim();
-    const titleHint = String(row.titleHint || row.title || "")
-      .trim()
-      .slice(0, 40);
-    const angle = String(row.angle || "")
-      .trim()
-      .slice(0, 80);
-    if (!topicId || !titleHint || !angle) continue;
-    byId.set(topicId, { titleHint, angle });
-  }
-
-  const topics = posts.map((p) => {
-    const hit = byId.get(p.id);
-    return {
-      id: p.id,
-      titleHint: hit?.titleHint || "",
-      angle: hit?.angle || "",
-    };
-  });
-
-  if (!topics.some((t) => t.titleHint && t.angle)) {
-    return NextResponse.json({ error: "模型未生成有效选题" }, { status: 502 });
-  }
-
-  return NextResponse.json({ topics, model: MODEL });
 }

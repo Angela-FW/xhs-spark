@@ -1220,7 +1220,7 @@ export const PERSONA_PRESETS: {
       background: "双非本科",
       stage: "离职后求职重启：简历 + 真实焦虑",
       voice:
-        "真诚、克制煽情、有具体动作与复盘；现在时叙述，不做成功学鸡汤。",
+        "真诚、现在时日记体；短句换行；先写具体发生再写沉淀；项目和数字写清楚，少文学比喻。",
       audience: "30+ 想重启/正在求职、在意年龄与学历标签的人",
       trustAnchors: [...JOB_TRUST],
       topicSeeds: cloneSeeds(JOB_SEEDS),
@@ -1888,6 +1888,64 @@ const INSIGHT_PLACEHOLDERS: Record<
     "例如：下班路过那家面馆又在排队，今晚只想把灯调暗、把手机放下……",
   custom: "例如：今天发生的一件小事，回头想想其实挺适合写成一篇……",
 };
+
+const COVER_PROMPT_PLACEHOLDERS: Record<
+  Exclude<PresetId, "job-restart" | "career-growth">,
+  string
+> = {
+  home: "可留空则按标题和正文出图。也可写：窗边小桌、绿植、亚麻、自然光。素色加字可写：素色米色背景。图片上文字：收纳3步，花费89",
+  beauty:
+    "可留空则按标题和正文出图。也可写：梳妆台、口红、散粉、晨光。素色加字可写：素色浅粉背景。图片上文字：空瓶12，回购5",
+  auto: "可留空则按标题和正文出图。也可写：车内中控、钥匙、杯架咖啡。素色加字可写：素色深灰背景。图片上文字：油耗5.8",
+  resign:
+    "可留空则按标题和正文出图。也可写：书桌、简历、笔记本、窗光。素色加字可写：素色淡紫色背景。图片上文字：沟通356，简历交换123，面试4",
+  "career-daily":
+    "可留空则按标题和正文出图。也可写：办公桌、笔记本、茶杯、白天。素色加字可写：素色浅蓝背景。图片上文字：周会3，待办12",
+  "life-journal":
+    "可留空则按标题和正文出图。也可写：餐桌、家常菜、暖灯。素色加字可写：素色暖米色背景。图片上文字：做饭1次，少刷2小时",
+  custom:
+    "可留空则按标题和正文出图。也可写场景、构图、光线。素色加字可写：素色背景。图片上文字：要点1，要点2",
+};
+
+/** Cover-prompt placeholder, matching the active persona. */
+export function coverPromptPlaceholderForPersona(
+  persona: CreatorPersona,
+): string {
+  const id = normalizePresetId(persona.presetId);
+  if (id !== "custom") {
+    return (
+      COVER_PROMPT_PLACEHOLDERS[id as keyof typeof COVER_PROMPT_PLACEHOLDERS] ??
+      COVER_PROMPT_PLACEHOLDERS.custom
+    );
+  }
+
+  const text = personaDomainText(persona);
+  if (
+    persona.contentMix === "job" ||
+    /求职|离职|面试|简历|双非|找工作/.test(text)
+  ) {
+    return COVER_PROMPT_PLACEHOLDERS.resign;
+  }
+  if (
+    persona.contentMix === "career" ||
+    /职场|晋升|协作|向上管理/.test(text)
+  ) {
+    return COVER_PROMPT_PLACEHOLDERS["career-daily"];
+  }
+  if (/家居|收纳|软装|装修|租房改造|小户型/.test(text)) {
+    return COVER_PROMPT_PLACEHOLDERS.home;
+  }
+  if (/美妆|化妆|口红|底妆|护肤|空瓶|妆容/.test(text)) {
+    return COVER_PROMPT_PLACEHOLDERS.beauty;
+  }
+  if (/汽车|车主|开车|试驾|油耗|保养|停车/.test(text)) {
+    return COVER_PROMPT_PLACEHOLDERS.auto;
+  }
+  if (/美食|做饭|探店|下厨|烘焙|菜谱/.test(text)) {
+    return COVER_PROMPT_PLACEHOLDERS["life-journal"];
+  }
+  return COVER_PROMPT_PLACEHOLDERS.custom;
+}
 
 /** Placeholder for the insight inbox, matching the active persona. */
 export function insightPlaceholderForPersona(persona: CreatorPersona): string {

@@ -21,19 +21,34 @@ export async function runKolors(opts: {
     image_size: KOLORS_SIZE,
     batch_size: 1,
     num_inference_steps: 20,
-    guidance_scale: 7,
+    guidance_scale: 7.5,
     seed: opts.seed,
     negative_prompt:
       "text, letters, numbers, watermark, logo, extra fingers, deformed hands, extra limbs",
   };
   if (opts.image) payload.image = opts.image;
 
+  const sizes = opts.image ? [KOLORS_SIZE] : [KOLORS_SIZE, "768x1024"];
+  let last: KolorsResult | undefined;
+  for (let i = 0; i < sizes.length; i++) {
+    payload.image_size = sizes[i];
+    last = await callKolors(opts.apiKey, payload);
+    if (last.ok) return last;
+    // 400 on size / 5xx blip: try the next official size once.
+    if (last.status !== 400 && last.status < 500) return last;
+  }
+  return last ?? { ok: false, status: 502, detail: "empty Kolors response" };
+}
+
+async function callKolors(
+  apiKey: string,
+  payload: Record<string, unknown>,
+): Promise<KolorsResult> {
   const upstream = await fetch("https://api.siliconflow.cn/v1/images/generations", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "X-Enable-Watermark": "0",
     },
     body: JSON.stringify(payload),
   });
@@ -72,11 +87,25 @@ export async function runKolors(opts: {
 }
 
 export function kolorsErrorMessage(status: number, detail: string): string {
-  if (status === 429) {
+  const d = (detail || "").toLowerCase();
+  if (
+    status === 429 ||
+    /rate.?limit|quota|exceed|额度|次数|too many/i.test(d)
+  ) {
     return "硅基流动今日免费额度已用完（Kolors 有每日上限）。请明天再试。";
   }
-  if (status === 401 || status === 403) {
+  if (
+    status === 401 ||
+    status === 403 ||
+    /unauthorized|invalid api|api key|鉴权|实名/.test(d)
+  ) {
     return "硅基流动鉴权失败。请检查 API Key；免费模型需完成实名认证。";
+  }
+  if (/balance|insufficient|欠费|余额/.test(d)) {
+    return "硅基流动余额不足。请检查账号额度。";
+  }
+  if (status >= 500) {
+    return "硅基流动服务暂时异常，请稍后重试。";
   }
   return `硅基流动生图失败 (${status})`;
 }

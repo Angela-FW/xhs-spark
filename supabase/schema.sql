@@ -16,6 +16,13 @@ create policy "Users manage own planner state"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+do $$
+begin
+  execute 'alter publication supabase_realtime add table public.planner_state';
+exception
+  when duplicate_object then null;
+end $$;
+
 -- Per-user AI keys (cover + Workers AI text). Never shared across accounts.
 create table if not exists public.user_cover_keys (
   user_id uuid primary key references auth.users (id) on delete cascade,

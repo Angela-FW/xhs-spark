@@ -261,17 +261,21 @@ export function distillCoverVisualPrompt(input: CoverDistillInput): string {
 export function resolveCoverVisualPrompt(
   input: CoverDistillInput & { prompt?: string },
 ): string {
-  const userPrompt = normalizeUserCoverPrompt(input.userPrompt || input.prompt);
+  const typed = normalizeUserCoverPrompt(input.userPrompt);
+  // Typed box wins: never mix in title/body.
+  if (typed) {
+    return typed;
+  }
   const hasTopic = Boolean(input.title?.trim() || input.body?.trim());
   const raw = (input.prompt || "").trim();
 
-  if (hasTopic || userPrompt) {
-    return distillCoverVisualPrompt({ ...input, userPrompt });
+  if (hasTopic) {
+    return distillCoverVisualPrompt({ ...input, userPrompt: "" });
   }
   if (raw && !coverPromptHasHeavyCjk(raw)) return raw;
   return distillCoverVisualPrompt({
     ...input,
-    userPrompt,
+    userPrompt: "",
     title: input.title || raw,
   });
 }
