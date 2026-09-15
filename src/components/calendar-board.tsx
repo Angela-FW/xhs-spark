@@ -6,7 +6,7 @@ import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SwipeDeleteRow } from "@/components/swipe-delete-row";
 import { pillarLabel } from "@/lib/persona";
-import { weekStartForWeek } from "@/lib/year-calendar";
+import { mondayOnOrAfter, weekStartForWeek } from "@/lib/year-calendar";
 import { Button } from "@/components/ui/button";
 
 export function CalendarBoard({
@@ -38,10 +38,16 @@ export function CalendarBoard({
     <div className="space-y-4">
       <div className="space-y-5">
         {weeks.map(([week, posts]) => {
-          const weekDate =
-            posts.find((p) => p.status !== "published")?.weekStart ??
-            posts[0]?.weekStart ??
-            weekStartForWeek(state.calendarStart, week);
+          const publishedMonday = posts
+            .map((p) =>
+              p.status === "published" ? p.publishedAt : undefined,
+            )
+            .filter((d): d is string => Boolean(d))
+            .sort()[0];
+          const weekDate = publishedMonday
+            ? mondayOnOrAfter(publishedMonday)
+            : posts[0]?.weekStart ??
+              weekStartForWeek(state.calendarStart, week);
           const isFrontier = week === absoluteMaxWeek;
           return (
             <section

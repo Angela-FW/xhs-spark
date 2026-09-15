@@ -8,7 +8,7 @@
 - **日历首页**：默认展示未来 **4 周**路线，可往后翻继续生成
 - **多人设**：每人设独立笔记库；顶栏可切换
 - **生文**：用站点共用的 Cloudflare Workers AI（服务端 `CLOUDFLARE_*`），用户不用配 Key
-- **生图**：每人自备 Cloudflare / 硅基流动等 Key；登录后同步到账号，**不占用别人额度**
+- **生图**：每人自备 [硅基流动](https://cloud.siliconflow.cn) Key（免费模型 Kolors，需实名）；登录后同步到账号，**不占用别人额度**
 - **点「生成」**：才弹出登录 / 注册（保护额度，并开启云端同步）
 
 ## 每次怎么打开
@@ -49,8 +49,8 @@ npm run dev -- --port 43123 --hostname 127.0.0.1
 
 3. **文生 vs 生图 Key**
    - 文案 / 周选题：在 Netlify / `.env.local` 配置站点共用的 `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`
-   - 生图：每人自备 Key（推荐 [Cloudflare Workers AI](https://dash.cloudflare.com/?to=/:account/ai/workers-ai)，约 1 万 Neurons/天）；注册弹窗或生成页填写，登录后写入 Supabase
-   - 站点**不会**用共享服务端 Key 代付生图额度
+   - 生图：每人自备 [硅基流动](https://cloud.siliconflow.cn) API Key（Kolors 免费，需实名）；注册弹窗或生成页填写，登录后写入 Supabase
+   - 站点**不会**用共享服务端 Key 代付生图额度。本地调试可把你自己的 Key 写在 `.env.local` 的 `SILICONFLOW_API_KEY`，仅本机有效
 
 登录后：规划数据与生图 Key 都会同步到 Supabase。
 

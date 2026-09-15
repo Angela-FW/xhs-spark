@@ -1,0 +1,82 @@
+/** SiliconFlow Kolors — the only cover model. Callers pass the signed-in user's key. */
+
+export const KOLORS_MODEL = "Kwai-Kolors/Kolors";
+/** Official 3:4 size; client later fits to 1080x1440. */
+export const KOLORS_SIZE = "960x1280";
+
+export type KolorsOk = { ok: true; b64?: string; url?: string };
+export type KolorsErr = { ok: false; status: number; detail: string };
+export type KolorsResult = KolorsOk | KolorsErr;
+
+export async function runKolors(opts: {
+  apiKey: string;
+  prompt: string;
+  seed: number;
+  /** data URL or public URL for img2img */
+  image?: string;
+}): Promise<KolorsResult> {
+  const payload: Record<string, unknown> = {
+    model: KOLORS_MODEL,
+    prompt: opts.prompt,
+    image_size: KOLORS_SIZE,
+    batch_size: 1,
+    num_inference_steps: 20,
+    guidance_scale: 7,
+    seed: opts.seed,
+    negative_prompt:
+      "text, letters, numbers, watermark, logo, extra fingers, deformed hands, extra limbs",
+  };
+  if (opts.image) payload.image = opts.image;
+
+  const upstream = await fetch("https://api.siliconflow.cn/v1/images/generations", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${opts.apiKey}`,
+      "Content-Type": "application/json",
+      "X-Enable-Watermark": "0",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await upstream.text();
+  let parsed: {
+    images?: { url?: string; b64_json?: string }[];
+    data?: { url?: string; b64_json?: string }[];
+    error?: string | { message?: string };
+    message?: string;
+  } = {};
+  try {
+    parsed = JSON.parse(text) as typeof parsed;
+  } catch {
+    return {
+      ok: false,
+      status: upstream.status || 502,
+      detail: text.slice(0, 400),
+    };
+  }
+
+  if (!upstream.ok) {
+    const detail =
+      (typeof parsed.error === "string"
+        ? parsed.error
+        : parsed.error?.message) ||
+      parsed.message ||
+      text.slice(0, 400);
+    return { ok: false, status: upstream.status, detail };
+  }
+
+  const first = parsed.images?.[0] || parsed.data?.[0];
+  if (first?.b64_json) return { ok: true, b64: first.b64_json };
+  if (first?.url) return { ok: true, url: first.url };
+  return { ok: false, status: 502, detail: text.slice(0, 300) };
+}
+
+export function kolorsErrorMessage(status: number, detail: string): string {
+  if (status === 429) {
+    return "硅基流动今日免费额度已用完（Kolors 有每日上限）。请明天再试。";
+  }
+  if (status === 401 || status === 403) {
+    return "硅基流动鉴权失败。请检查 API Key；免费模型需完成实名认证。";
+  }
+  return `硅基流动生图失败 (${status})`;
+}

@@ -19,7 +19,7 @@ create policy "Users manage own planner state"
 -- Per-user AI keys (cover + Workers AI text). Never shared across accounts.
 create table if not exists public.user_cover_keys (
   user_id uuid primary key references auth.users (id) on delete cascade,
-  provider text not null default 'cloudflare',
+  provider text not null default 'siliconflow',
   cloudflare_account_id text not null default '',
   cloudflare_token text not null default '',
   siliconflow_key text not null default '',

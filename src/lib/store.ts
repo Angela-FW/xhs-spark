@@ -1,14 +1,13 @@
 import type { CalendarPost, PostMaterial, YearCalendar } from "./year-calendar";
 import {
   addDays,
+  assignWeekMondays,
   buildWeekPosts,
   buildYearCalendar,
-  diffCalendarDays,
+  mondayOfContainingWeek,
   mondayOnOrAfter,
-  publishedWeekOrigin,
   todayLocal,
   uniqueCalendarPostId,
-  weekNumberForDate,
   weekStartForWeek,
 } from "./year-calendar";
 import {
@@ -333,58 +332,25 @@ export function deleteWorkspace(state: AppState, id: string): AppState {
 }
 
 /**
- * Unpublished (待写/已起草) notes shift forward 1 day per elapsed day.
- * Published notes keep their weekStart and publishedAt.
- * Also catch up if unpublished dates still sit before today (legacy data).
+ * Unpublished weeks stay on Mondays and slide forward if never published.
+ * Published weeks freeze on the Monday of the week they were actually posted.
  */
 export function rollUnpublishedSchedule(
   state: AppState,
   today = todayLocal(),
 ): AppState {
-  const asOf = state.scheduleAsOf || today;
-  let days = Math.max(0, diffCalendarDays(asOf, today));
-
-  let posts = state.posts;
-  if (days > 0) {
-    posts = posts.map((p) =>
-      p.status === "published"
-        ? p
-        : { ...p, weekStart: addDays(p.weekStart, days) },
-    );
-  }
-
-  const unpublished = posts.filter((p) => p.status !== "published");
-  if (unpublished.length) {
-    const earliest = unpublished.reduce(
-      (min, p) => (p.weekStart < min ? p.weekStart : min),
-      unpublished[0].weekStart,
-    );
-    const lag = diffCalendarDays(earliest, today);
-    if (lag > 0) {
-      posts = posts.map((p) =>
-        p.status === "published"
-          ? p
-          : { ...p, weekStart: addDays(p.weekStart, lag) },
-      );
-      days += lag;
-    }
-  }
-
-  if (days <= 0 && state.scheduleAsOf === today) return state;
-
-  const stillOpen = posts.filter((p) => p.status !== "published");
-  const calendarStart = stillOpen.length
-    ? stillOpen.reduce(
-        (min, p) => (p.weekStart < min ? p.weekStart : min),
-        stillOpen[0].weekStart,
-      )
-    : state.calendarStart;
-
+  const { posts, calendarStart } = assignWeekMondays(state.posts, today);
+  const unchanged =
+    state.scheduleAsOf === today &&
+    state.calendarStart === calendarStart &&
+    state.posts.length === posts.length &&
+    state.posts.every((post, i) => post.weekStart === posts[i].weekStart);
+  if (unchanged) return state;
   return {
     ...state,
+    posts,
     calendarStart,
     scheduleAsOf: today,
-    posts,
   };
 }
 
@@ -513,7 +479,7 @@ export function rebuildCalendarFromPersona(
   const maxWeek = locked.reduce((max, post) => Math.max(max, post.week), 0);
   const nextWeek = maxWeek + 1;
 
-  const todayMonday = mondayOnOrAfter(today);
+  const todayMonday = mondayOfContainingWeek(today);
   let nextWeekStart = todayMonday;
   if (locked.length) {
     const latestWeekStart = locked
@@ -584,7 +550,7 @@ export function appendNextCalendarWeek(state: AppState): AppState {
     0,
   );
   const nextWeek = maxWeek + 1;
-  const todayMonday = mondayOnOrAfter(todayLocal());
+  const todayMonday = mondayOfContainingWeek(todayLocal());
 
   let nextWeekStart = todayMonday;
   if (state.posts.length) {
@@ -614,12 +580,12 @@ export function appendNextCalendarWeek(state: AppState): AppState {
     { week: nextWeek, postsPerWeek: built.week.postsPerWeek },
   ].sort((a, b) => a.week - b.week);
 
-  return {
+  return rollUnpublishedSchedule({
     ...state,
     posts,
     weekMeta,
     selectedPostId: state.selectedPostId ?? built.posts[0]?.id ?? null,
-  };
+  });
 }
 
 export function updatePersonaFields(
@@ -969,16 +935,21 @@ export function setPostPublishStatus(
   today = todayLocal(),
 ): AppState {
   if (status === "published") {
-    const marked = updatePost(state, postId, {
-      status,
-      publishedAt: today,
-    });
-    return rebalancePublishedWeeks(marked);
+    return rollUnpublishedSchedule(
+      updatePost(state, postId, {
+        status,
+        publishedAt: today,
+      }),
+      today,
+    );
   }
-  return updatePost(state, postId, {
-    status,
-    publishedAt: undefined,
-  });
+  return rollUnpublishedSchedule(
+    updatePost(state, postId, {
+      status,
+      publishedAt: undefined,
+    }),
+    today,
+  );
 }
 
 function reindexWeek(posts: CalendarPost[], week: number): CalendarPost[] {
@@ -999,84 +970,9 @@ function reindexWeek(posts: CalendarPost[], week: number): CalendarPost[] {
   return [...others, ...ordered];
 }
 
-/** Move published notes onto the week of publishedAt; refill emptied weeks. */
+/** Snap week labels to Mondays without remapping week numbers. */
 export function rebalancePublishedWeeks(state: AppState): AppState {
-  const start = publishedWeekOrigin(
-    state.calendarStart || defaultCalendarStart(),
-    state.posts
-      .filter((p) => p.status === "published")
-      .map((p) => p.publishedAt)
-      .filter((d): d is string => Boolean(d)),
-  );
-  const originWeeks = new Set<number>();
-  for (const meta of state.weekMeta) originWeeks.add(meta.week);
-  for (const post of state.posts) originWeeks.add(post.week);
-
-  let posts = state.posts.map((post) => {
-    if (post.status !== "published") return post;
-    const at = post.publishedAt || todayLocal();
-    const week = weekNumberForDate(start, at);
-    return {
-      ...post,
-      publishedAt: at,
-      week,
-      weekStart: weekStartForWeek(start, week),
-    };
-  });
-
-  const weekMetaByWeek = new Map(
-    state.weekMeta.map((meta) => [meta.week, meta] as const),
-  );
-  for (const post of posts) {
-    if (!weekMetaByWeek.has(post.week)) {
-      weekMetaByWeek.set(post.week, {
-        week: post.week,
-        postsPerWeek: defaultPostsPerWeek(post.week),
-      });
-    }
-  }
-
-  const usedTitles = new Set(posts.map((post) => post.titleHint));
-  const existingIds = new Set(posts.map((post) => post.id));
-  const fills: CalendarPost[] = [];
-
-  for (const week of [...originWeeks].sort((a, b) => a - b)) {
-    if (posts.some((post) => post.week === week)) continue;
-    const weekStart = weekStartForWeek(start, week);
-    const count = Math.max(
-      1,
-      weekMetaByWeek.get(week)?.postsPerWeek ?? defaultPostsPerWeek(week),
-    );
-    const built = buildWeekPosts({
-      week,
-      weekStart,
-      persona: state.persona,
-      usedTitles,
-    });
-    const slice = built.posts.slice(0, count);
-    for (let i = 0; i < slice.length; i++) {
-      fills.push({
-        ...slice[i],
-        id: uniqueCalendarPostId(existingIds, week, i),
-        indexInWeek: i,
-      });
-    }
-    if (!weekMetaByWeek.has(week)) {
-      weekMetaByWeek.set(week, { week, postsPerWeek: count });
-    }
-  }
-
-  posts = [...posts, ...fills];
-  for (const week of new Set(posts.map((post) => post.week))) {
-    posts = reindexWeek(posts, week);
-  }
-  posts.sort((a, b) => a.week - b.week || a.indexInWeek - b.indexInWeek);
-
-  return {
-    ...state,
-    posts,
-    weekMeta: Array.from(weekMetaByWeek.values()).sort((a, b) => a.week - b.week),
-  };
+  return rollUnpublishedSchedule(state);
 }
 
 function weekQuota(state: AppState, week: number): number {

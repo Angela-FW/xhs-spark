@@ -5,21 +5,14 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 type CloudCoverKeysRow = {
   provider: string | null;
-  cloudflare_account_id: string | null;
-  cloudflare_token: string | null;
   siliconflow_key: string | null;
-  pollinations_key: string | null;
   configured_at: string | null;
   updated_at: string;
 };
 
 function rowToKeys(row: CloudCoverKeysRow): StoredCoverKeys {
   return {
-    provider: (row.provider as StoredCoverKeys["provider"]) || "cloudflare",
-    cloudflareAccountId: row.cloudflare_account_id || "",
-    cloudflareToken: row.cloudflare_token || "",
     siliconflowKey: row.siliconflow_key || "",
-    pollinationsKey: row.pollinations_key || "",
     configuredAt: row.configured_at || row.updated_at || undefined,
   };
 }
@@ -31,9 +24,7 @@ export async function fetchCloudCoverKeys(
   if (!sb) return null;
   const { data, error } = await sb
     .from("user_cover_keys")
-    .select(
-      "provider, cloudflare_account_id, cloudflare_token, siliconflow_key, pollinations_key, configured_at, updated_at",
-    )
+    .select("provider, siliconflow_key, configured_at, updated_at")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -52,11 +43,11 @@ export async function saveCloudCoverKeys(
   const { error } = await sb.from("user_cover_keys").upsert(
     {
       user_id: userId,
-      provider: keys.provider || "cloudflare",
-      cloudflare_account_id: keys.cloudflareAccountId?.trim() || "",
-      cloudflare_token: keys.cloudflareToken?.trim() || "",
+      provider: "siliconflow",
       siliconflow_key: keys.siliconflowKey?.trim() || "",
-      pollinations_key: keys.pollinationsKey?.trim() || "",
+      cloudflare_account_id: "",
+      cloudflare_token: "",
+      pollinations_key: "",
       configured_at: configuredAt,
       updated_at: updatedAt,
     },

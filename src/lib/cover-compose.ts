@@ -198,7 +198,7 @@ function splitLabelValue(item: string): { label: string; value: string } {
 }
 
 /**
- * Local typographic cover — accurate Chinese text (Flux cannot reliably paint CJK).
+ * Local typographic cover — accurate Chinese text (we overlay instead of asking the model to paint CJK).
  * Optional reference image is used as the background (cover-fit).
  * Returns a blob: URL.
  */
@@ -322,7 +322,7 @@ export async function fitCoverToNoteSize(imageUrl: string): Promise<string> {
 
 /**
  * Draw user-requested Chinese onto a generated photo.
- * Flux cannot paint CJK; we overlay only when the user asked for text.
+ * Cover titles stay locally typeset; we overlay only when the user asked for text.
  */
 export async function overlayCoverText(
   imageUrl: string,

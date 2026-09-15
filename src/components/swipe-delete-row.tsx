@@ -26,11 +26,7 @@ export function SwipeDeleteRow({
     startX.current = e.clientX;
     startY.current = e.clientY;
     base.current = offset;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      /* synthetic / already captured */
-    }
+    // Don't capture yet — capturing on pointerdown steals click from 继续/生成.
   }
 
   function onPointerMove(e: PointerEvent<HTMLDivElement>) {
@@ -40,6 +36,13 @@ export function SwipeDeleteRow({
     if (!axis.current) {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       axis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      if (axis.current === "x") {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* synthetic / already captured */
+        }
+      }
     }
     if (axis.current !== "x") return;
     const next = Math.min(0, Math.max(-ACTION_WIDTH, base.current + dx));

@@ -16,7 +16,6 @@ import {
   generateCoverImage,
 } from "@/lib/cover-image";
 import {
-  canGenerateAiCover,
   hasUsableCoverKeys,
   loadCoverKeys,
   toCoverCredentials,
@@ -70,12 +69,37 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const [bodyHint, setBodyHint] = useState<string | null>(null);
   const [justGenerated, setJustGenerated] = useState(false);
   const [keysModalOpen, setKeysModalOpen] = useState(false);
+  const [keysTick, setKeysTick] = useState(0);
+  const [localEnvReady, setLocalEnvReady] = useState(false);
   const [pendingCoverSeed, setPendingCoverSeed] = useState<number | null>(null);
   const [confirmPublish, setConfirmPublish] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const bodyReqId = useRef(0);
   const requireAuthRef = useRef(requireAuth);
   requireAuthRef.current = requireAuth;
+  const hasCoverKey = hasUsableCoverKeys();
+
+  useEffect(() => {
+    const sync = () => setKeysTick((n) => n + 1);
+    window.addEventListener("restart-cover-keys", sync);
+    return () => window.removeEventListener("restart-cover-keys", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!usesLocalCoverFallback()) return;
+    let cancelled = false;
+    fetch("/api/cover-status")
+      .then((res) => res.json())
+      .then((data: { siliconflow?: boolean }) => {
+        if (!cancelled) setLocalEnvReady(Boolean(data.siliconflow));
+      })
+      .catch(() => {
+        if (!cancelled) setLocalEnvReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setTitleSeed(0);
@@ -307,9 +331,8 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       selectedTitle || post.titleHint,
     );
 
-    // Production: user-supplied keys. Local next dev: server CLOUDFLARE_* fallback.
     const creds = toCoverCredentials(loadCoverKeys());
-    if (!canGenerateAiCover(creds)) {
+    if (!hasUsableCoverKeys(creds) && !localEnvReady) {
       setPendingCoverSeed(nextSeed ?? null);
       setKeysModalOpen(true);
       return;
@@ -609,20 +632,18 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
         </div>
 
         <p className="mb-4 text-xs text-[var(--ink-soft)]">
-          {hasUsableCoverKeys()
-            ? "已配置你的生图 Key（登录后跨设备同步）。"
-            : usesLocalCoverFallback()
-              ? "本地测试直接使用 .env.local 里的生图 Key，无需再配。"
-              : "生图需填写你自己的 Key；登录后会同步到账号，不占用别人额度。"}{" "}
-          {usesLocalCoverFallback() && !hasUsableCoverKeys() ? null : (
-            <button
-              type="button"
-              className="text-[var(--coral-deep)] underline-offset-2 hover:underline"
-              onClick={() => setKeysModalOpen(true)}
-            >
-              {hasUsableCoverKeys() ? "修改 Key" : "配置 Key"}
-            </button>
-          )}
+          {hasCoverKey
+            ? "已配置你的硅基流动 Key（登录后跨设备同步，只用你自己的额度）。"
+            : localEnvReady
+              ? "本机 .env.local 已有 Key，也可再填一把自己的。"
+              : "生图需填写你自己的硅基流动 Key；登录后会同步到账号，不占用别人额度。"}{" "}
+          <button
+            type="button"
+            className="text-[var(--coral-deep)] underline-offset-2 hover:underline"
+            onClick={() => setKeysModalOpen(true)}
+          >
+            {hasCoverKey ? "修改 Key" : "配置 Key"}
+          </button>
         </p>
 
         <div className="space-y-2 rounded-xl border border-[var(--coral)]/25 bg-[var(--coral)]/5 p-4">

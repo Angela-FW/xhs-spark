@@ -1,40 +1,24 @@
 /**
- * Cover credentials for API routes.
- * Production never uses shared site keys — users must paste their own.
- * Local `next dev` may fall back to CLOUDFLARE_* already used for text gen.
+ * Cover credentials.
+ * Production: each signed-in user must send their own SiliconFlow key.
+ * Local `next dev` may fall back to SILICONFLOW_API_KEY in .env.local for the
+ * developer only — never used as a shared site quota.
  */
 
 export function isLocalCoverFallback(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
-export function localCloudflareCoverCreds(): {
-  accountId: string;
-  token: string;
-} {
-  if (!isLocalCoverFallback()) return { accountId: "", token: "" };
-  return {
-    accountId: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "",
-    token: process.env.CLOUDFLARE_API_TOKEN?.trim() || "",
-  };
-}
-
-export function resolveCloudflareCoverCreds(input: {
-  accountId?: string;
-  token?: string;
-}): { accountId: string; token: string } {
-  const accountId = input.accountId?.trim() || "";
-  const token = input.token?.trim() || "";
-  if (accountId && token) return { accountId, token };
-  return localCloudflareCoverCreds();
-}
-
-export function resolveCoverApiKey(
-  userKey: string | undefined,
-  envName: "SILICONFLOW_API_KEY" | "POLLINATIONS_API_KEY",
-): string {
+export function resolveSiliconflowKey(userKey: string | undefined): string {
   const fromUser = userKey?.trim() || "";
   if (fromUser) return fromUser;
   if (!isLocalCoverFallback()) return "";
-  return process.env[envName]?.trim() || "";
+  return process.env.SILICONFLOW_API_KEY?.trim() || "";
+}
+
+export function missingSiliconflowKeyMessage(): string {
+  if (isLocalCoverFallback()) {
+    return "本地未配置硅基流动：请在页面填写你的 API Key，或在 .env.local 增加 SILICONFLOW_API_KEY（仅本机自用）。";
+  }
+  return "未配置生图 Key：请在生成页填写你自己的硅基流动 API Key（登录后会同步到账号，不占用别人额度）。";
 }

@@ -209,8 +209,8 @@ function uniqueKeywords(parts: Array<string | null | undefined>): string {
 }
 
 /**
- * Turn title + body + optional user notes into English keywords for Flux T2I.
- * Flux-1-schnell is text-to-image only: it reads English tags, not Chinese copy.
+ * Turn title + body + optional user notes into visual keywords for Kolors.
+ * Rule-based fallback when the LLM distill is unavailable.
  */
 export function distillCoverVisualPrompt(input: CoverDistillInput): string {
   const userPrompt = normalizeUserCoverPrompt(input.userPrompt);

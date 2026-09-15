@@ -100,6 +100,70 @@ export function mondayOnOrAfter(iso: string): string {
   return formatLocalYmd(d);
 }
 
+/** Monday of the week that contains `iso` (Mon–Sun). */
+export function mondayOfContainingWeek(iso: string): string {
+  const d = parseLocalYmd(iso);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return formatLocalYmd(d);
+}
+
+function laterYmd(a: string, b: string): string {
+  return a >= b ? a : b;
+}
+
+/**
+ * Published weeks freeze on mondayOnOrAfter(first publishedAt).
+ * Weeks with no published notes pack onto consecutive Mondays,
+ * never earlier than this week's Monday.
+ */
+export function assignWeekMondays(
+  posts: CalendarPost[],
+  today = todayLocal(),
+): { posts: CalendarPost[]; calendarStart: string } {
+  const thisMonday = mondayOfContainingWeek(today);
+  const byWeek = new Map<number, CalendarPost[]>();
+  for (const post of posts) {
+    const list = byWeek.get(post.week) ?? [];
+    list.push(post);
+    byWeek.set(post.week, list);
+  }
+  const weeks = [...byWeek.keys()].sort((a, b) => a - b);
+  const locked = weeks.filter((week) =>
+    byWeek.get(week)!.some((post) => post.status === "published"),
+  );
+  const open = weeks.filter((week) =>
+    byWeek.get(week)!.every((post) => post.status !== "published"),
+  );
+
+  const starts = new Map<number, string>();
+  for (const week of locked) {
+    const earliest = byWeek
+      .get(week)!
+      .map((post) => post.publishedAt)
+      .filter((d): d is string => Boolean(d))
+      .sort()[0];
+    starts.set(week, earliest ? mondayOnOrAfter(earliest) : thisMonday);
+  }
+
+  const lastLocked = locked[locked.length - 1];
+  const lastLockedMonday =
+    lastLocked != null ? starts.get(lastLocked)! : addDays(thisMonday, -7);
+  const firstOpenMonday = laterYmd(addDays(lastLockedMonday, 7), thisMonday);
+  open.forEach((week, index) => {
+    starts.set(week, addDays(firstOpenMonday, index * 7));
+  });
+
+  return {
+    posts: posts.map((post) => ({
+      ...post,
+      weekStart: starts.get(post.week) ?? post.weekStart,
+    })),
+    calendarStart: starts.get(1) ?? thisMonday,
+  };
+}
+
 /** Week 1 starts at `week1Start`. Dates before that clamp to week 1. */
 export function weekNumberForDate(week1Start: string, iso: string): number {
   const days = diffCalendarDays(week1Start, iso);

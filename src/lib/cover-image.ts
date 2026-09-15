@@ -4,19 +4,10 @@ import { fitCoverToNoteSize } from "@/lib/cover-compose";
 import { distillCoverVisualPrompt } from "@/lib/cover-scene";
 import type { CreatorPersona } from "@/lib/persona";
 
-/** Xiaohongshu 3:4. Cloudflare Flux ignores size; we crop after generation. */
-const WIDTH = 1080;
-const HEIGHT = 1440;
-const SIZE = `${WIDTH}x${HEIGHT}`;
-
-export type CoverProvider = "cloudflare" | "siliconflow" | "pollinations";
+/** Xiaohongshu 3:4. Kolors returns 960x1280; we fit after generation. */
 
 export type CoverCredentials = {
-  provider: CoverProvider;
-  cloudflareAccountId?: string;
-  cloudflareToken?: string;
   siliconflowKey?: string;
-  pollinationsKey?: string;
 };
 
 export function buildCoverPrompt(
@@ -112,7 +103,7 @@ async function parseImageResponse(res: Response): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
-/** Text-to-image via local multi-provider proxy. */
+/** Text-to-image via Kolors, using the signed-in user's SiliconFlow key. */
 export async function generateCoverImage(
   post: CalendarPost,
   options?: {
@@ -136,7 +127,6 @@ export async function generateCoverImage(
   },
 ): Promise<string> {
   const creds = options?.credentials;
-  const provider = creds?.provider ?? "cloudflare";
   const visual = distillCoverVisualPrompt({
     title: options?.title || post.titleHint,
     body: options?.noteBody,
@@ -156,17 +146,9 @@ export async function generateCoverImage(
   const headers: HeadersInit = await withAuthHeaders({
     "Content-Type": "application/json",
   });
-  if (provider === "cloudflare" && creds?.cloudflareToken) {
-    (headers as Record<string, string>)["x-cloudflare-token"] =
-      creds.cloudflareToken;
-  }
-  if (provider === "siliconflow" && creds?.siliconflowKey) {
+  if (creds?.siliconflowKey) {
     (headers as Record<string, string>)["x-siliconflow-key"] =
       creds.siliconflowKey;
-  }
-  if (provider === "pollinations" && creds?.pollinationsKey) {
-    (headers as Record<string, string>)["x-pollinations-key"] =
-      creds.pollinationsKey;
   }
 
   const res = await fetch("/api/cover-generate", {
@@ -186,17 +168,8 @@ export async function generateCoverImage(
       audience: options?.persona?.audience,
       stage: options?.persona?.stage,
       voice: options?.persona?.voice,
-      provider,
-      size: SIZE,
       seed,
-      cloudflareAccountId: creds?.cloudflareAccountId,
-      cloudflareToken: creds?.cloudflareToken,
-      apiKey:
-        provider === "siliconflow"
-          ? creds?.siliconflowKey
-          : provider === "pollinations"
-            ? creds?.pollinationsKey
-            : undefined,
+      apiKey: creds?.siliconflowKey,
     }),
     signal: options?.signal,
   });
@@ -204,9 +177,7 @@ export async function generateCoverImage(
   return fitCoverToNoteSize(await parseImageResponse(res));
 }
 
-/**
- * Upload a local reference file for img2img via local proxy (Cloudflare by default).
- */
+/** Upload a local reference file for Kolors img2img (user's own key). */
 export async function editCoverFromFile(
   post: CalendarPost,
   file: File,
@@ -219,29 +190,17 @@ export async function editCoverFromFile(
 ): Promise<string> {
   const prompt = resolvePrompt(post, options?.prompt, true);
   const compressed = await compressImageFile(file, 1024, 0.85);
-  const provider = options?.credentials?.provider ?? "cloudflare";
 
   const form = new FormData();
   form.append("image", compressed, compressed.name || "reference.jpg");
   form.append("prompt", prompt);
-  form.append("provider", provider);
   form.append("strength", "0.65");
   if (options?.seed != null) form.append("seed", String(options.seed));
-  if (options?.credentials?.cloudflareAccountId) {
-    form.append(
-      "cloudflareAccountId",
-      options.credentials.cloudflareAccountId,
-    );
-  }
 
   const headers: HeadersInit = await withAuthHeaders();
-  if (provider === "pollinations" && options?.credentials?.pollinationsKey) {
-    (headers as Record<string, string>)["x-pollinations-key"] =
-      options.credentials.pollinationsKey;
-  }
-  if (provider === "cloudflare" && options?.credentials?.cloudflareToken) {
-    (headers as Record<string, string>)["x-cloudflare-token"] =
-      options.credentials.cloudflareToken;
+  if (options?.credentials?.siliconflowKey) {
+    (headers as Record<string, string>)["x-siliconflow-key"] =
+      options.credentials.siliconflowKey;
   }
 
   const res = await fetch("/api/cover-edit", {

@@ -33,10 +33,10 @@ export function CoverKeysModal({ open, onClose, onConfigured }: Props) {
               id="cover-keys-title"
               className="font-display text-lg text-[var(--ink)]"
             >
-              配置文生图 Key
+              配置生图 Key
             </h3>
             <p className="mt-1 text-xs text-[var(--ink-soft)]">
-              每人使用自己的 Key，登录后跨设备同步到账号。不会占用别人的 Cloudflare 额度。
+              用硅基流动 Kolors。每人一把 Key，登录后只同步到你的账号，不占用别人额度。
             </p>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={onClose}>

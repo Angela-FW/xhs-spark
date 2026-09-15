@@ -3,35 +3,35 @@ import {
   type CoverBrief,
 } from "@/lib/cover-compose";
 
-/** Flux-1-schnell understands English far better than Chinese. */
-export function buildFluxPrompt(raw: string): string {
+/** Kolors is bilingual; keep 3:4 still-life constraints and never paint cover copy. */
+export function buildCoverImagePrompt(raw: string): string {
   const text = raw.trim().slice(0, 900);
   const brief = parseCoverBrief(text);
 
   if (brief.wantsText) {
     return uniqueJoin([
-      "abstract minimal background",
-      "vertical 3:4 cover",
-      "empty center space",
-      "no people",
-      "no faces",
-      "no letters",
-      "no numbers",
-      "no logos",
-      brief.color || "soft muted tones",
-      "paper texture",
+      "抽象留白背景",
+      "竖版 3:4 封面",
+      "中心大面积空白",
+      "不要人物",
+      "不要脸",
+      "不要文字",
+      "不要数字",
+      "不要 logo",
+      brief.color || "柔和低饱和配色",
+      "纸质纹理",
     ]);
   }
 
   return uniqueJoin([
     text,
-    "photorealistic",
-    "vertical 3:4",
-    "no text",
-    "no letters",
-    "no Chinese characters",
-    "no watermark",
-    "no logo",
+    "写实静物",
+    "竖版 3:4",
+    "不要文字",
+    "不要字母",
+    "不要汉字",
+    "不要水印",
+    "不要 logo",
   ]);
 }
 

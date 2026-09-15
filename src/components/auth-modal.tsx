@@ -169,14 +169,14 @@ export function AuthModal({
               </button>
               {showKeys ? <CoverKeysForm compact /> : (
                 <p className="text-xs text-[var(--ink-soft)]">
-                  每人自备 Cloudflare / 硅基流动等 Key，登录后同步到账号，不占用别人额度。可先注册，之后在生成页再配；
+                  生图用硅基流动 Kolors，每人自备 Key，登录后同步到账号，不占用别人额度。可先注册，之后在生成页再配；
                   <a
-                    href="https://dash.cloudflare.com/?to=/:account/ai/workers-ai"
+                    href="https://cloud.siliconflow.cn"
                     target="_blank"
                     rel="noreferrer"
                     className="text-[var(--coral-deep)] underline-offset-2 hover:underline"
                   >
-                    打开 Cloudflare 申请页
+                    打开硅基流动（需实名）
                   </a>
                   。
                 </p>
