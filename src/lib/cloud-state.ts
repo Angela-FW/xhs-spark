@@ -21,6 +21,22 @@ export async function fetchCloudState(
   };
 }
 
+export async function fetchCloudStateWithRetry(
+  userId: string,
+  attempts = 3,
+): Promise<{ data: AppState; updatedAt: string } | null> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetchCloudState(userId);
+    } catch (err) {
+      lastErr = err;
+      await new Promise((resolve) => window.setTimeout(resolve, 400 * (i + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("cloud pull failed");
+}
+
 export async function saveCloudState(
   userId: string,
   state: AppState,

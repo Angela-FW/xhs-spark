@@ -137,7 +137,11 @@ export type AppState = {
 export const INITIAL_PLAN_WEEKS = 4;
 
 const STORAGE_KEY = "restart-life-planner-v3";
+const BACKUP_KEY = "restart-life-planner-last-good-v1";
 const LEGACY_KEYS = ["restart-life-planner-v2", "restart-life-planner-v1"];
+
+/** Safari / another tab wiped localStorage while this tab still had notes. */
+export const PLANNER_STORAGE_CLEARED_EVENT = "restart-planner-storage-cleared";
 
 export const DEFAULT_WEIGHTS: PillarWeights = {
   restart: 1,
@@ -251,6 +255,41 @@ export function createInitialState(): AppState {
     workspaces: [],
     ...emptyActiveMirror(),
   };
+}
+
+function scorePosts(posts: CalendarPost[]): number {
+  let n = 0;
+  for (const p of posts) {
+    n += 1;
+    if (p.status === "drafted") n += 80;
+    if (p.status === "published") n += 100;
+    const body = p.draft?.body?.trim() ?? "";
+    if (body) n += 40 + Math.min(body.length, 8000) / 80;
+    n += (p.draft?.titles?.filter(Boolean).length ?? 0) * 8;
+    n += (p.materials?.length ?? 0) * 12;
+    if (p.draft?.extra?.trim()) n += 30;
+  }
+  return n;
+}
+
+/** Higher = more user work. Empty onboarding is 0; a launched calendar is > 0. */
+export function plannerSubstanceScore(state: AppState): number {
+  const flushed = syncActiveWorkspace(state);
+  let score = flushed.workspaces.length * 50;
+  for (const w of flushed.workspaces) {
+    score += scorePosts(w.posts);
+    score += (w.insights?.length ?? 0) * 20;
+    score += (w.chat ?? []).filter((m) => m.role === "user").length * 10;
+  }
+  if (!flushed.workspaces.length) {
+    score += scorePosts(flushed.posts);
+    score += (flushed.insights?.length ?? 0) * 20;
+  }
+  return Math.floor(score);
+}
+
+export function plannerHasContent(state: AppState): boolean {
+  return plannerSubstanceScore(state) > 0;
 }
 
 /** Start a new persona workspace from a launch preset (keeps other workspaces). */
@@ -859,6 +898,30 @@ function migrateParsed(
   return fallback;
 }
 
+function persistPlanner(state: AppState) {
+  const flushed = syncActiveWorkspace(state);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(flushed));
+  if (plannerHasContent(flushed)) {
+    localStorage.setItem(BACKUP_KEY, JSON.stringify(flushed));
+  }
+}
+
+function parsePlannerRaw(raw: string): AppState {
+  const parsed = JSON.parse(raw) as Partial<AppState> & { version?: number };
+  return rebalancePublishedWeeks(rollUnpublishedSchedule(migrateParsed(parsed)));
+}
+
+function loadLastGoodPlanner(): AppState | null {
+  try {
+    const raw = localStorage.getItem(BACKUP_KEY);
+    if (!raw) return null;
+    const restored = parsePlannerRaw(raw);
+    return plannerHasContent(restored) ? restored : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadState(): AppState {
   const fallback = createInitialState();
   if (typeof window === "undefined") return fallback;
@@ -870,15 +933,26 @@ export function loadState(): AppState {
         if (raw) break;
       }
     }
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<AppState> & { version?: number };
-    const migrated = rebalancePublishedWeeks(
-      rollUnpublishedSchedule(migrateParsed(parsed)),
-    );
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+    if (!raw) {
+      const restored = loadLastGoodPlanner();
+      if (restored) {
+        persistPlanner(restored);
+        return restored;
+      }
+      return fallback;
+    }
+    const migrated = parsePlannerRaw(raw);
+    if (!plannerHasContent(migrated)) {
+      const restored = loadLastGoodPlanner();
+      if (restored) {
+        persistPlanner(restored);
+        return restored;
+      }
+    }
+    persistPlanner(migrated);
     return migrated;
   } catch {
-    return fallback;
+    return loadLastGoodPlanner() ?? fallback;
   }
 }
 
@@ -886,7 +960,9 @@ export function loadState(): AppState {
 export function hasPlannerStorage(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    if (localStorage.getItem(STORAGE_KEY)) return true;
+    if (localStorage.getItem(STORAGE_KEY) || localStorage.getItem(BACKUP_KEY)) {
+      return true;
+    }
     return LEGACY_KEYS.some((key) => Boolean(localStorage.getItem(key)));
   } catch {
     return false;
@@ -897,6 +973,7 @@ export function clearPlannerStorage() {
   if (typeof window === "undefined") return;
   try {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(BACKUP_KEY);
     for (const key of LEGACY_KEYS) localStorage.removeItem(key);
   } catch {
     /* private mode / blocked */
@@ -905,7 +982,7 @@ export function clearPlannerStorage() {
 
 export function saveState(state: AppState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(syncActiveWorkspace(state)));
+  persistPlanner(state);
 }
 
 export function exportState(state: AppState): string {

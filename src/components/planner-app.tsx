@@ -14,13 +14,15 @@ import {
   fetchCloudCoverKeys,
   saveCloudCoverKeys,
 } from "@/lib/cloud-cover-keys";
-import { fetchCloudState, saveCloudState } from "@/lib/cloud-state";
+import { fetchCloudStateWithRetry, saveCloudState } from "@/lib/cloud-state";
+import { loadCoverKeys, mergeCoverKeys, saveCoverKeys } from "@/lib/cover-keys";
+import { resolvePlannerSync } from "@/lib/planner-sync";
 import {
-  hasUsableCoverKeys,
-  loadCoverKeys,
-  saveCoverKeys,
-} from "@/lib/cover-keys";
-import { importState } from "@/lib/store";
+  importState,
+  plannerHasContent,
+  PLANNER_STORAGE_CLEARED_EVENT,
+  syncActiveWorkspace,
+} from "@/lib/store";
 import { LAUNCH_PRESETS } from "@/lib/persona";
 
 const TABS = [
@@ -143,9 +145,12 @@ function CloudSyncBridge({
   onGateReady: (ready: boolean) => void;
 }) {
   const { user, ready: authReady } = useAuth();
-  const { state, ready, importJson, exportJson } = useAppStore();
+  const { state, ready, importJson } = useAppStore();
   const [cloudReady, setCloudReady] = useState(false);
   const pulling = useRef(false);
+  const syncRun = useRef(0);
+  const localRef = useRef(state);
+  localRef.current = state;
 
   useEffect(() => {
     if (!authReady || !ready) {
@@ -153,51 +158,91 @@ function CloudSyncBridge({
       return;
     }
     if (!user) {
-      // Browse locally — no cloud pull to wait for.
       setCloudReady(false);
       onGateReady(true);
       return;
     }
 
+    const userId = user.id;
     let cancelled = false;
-    pulling.current = true;
-    onGateReady(false);
-    setCloudReady(false);
-    (async () => {
+
+    async function syncFromCloud(opts?: { quiet?: boolean }) {
+      const runId = ++syncRun.current;
+      pulling.current = true;
+      if (!opts?.quiet) {
+        onGateReady(false);
+        setCloudReady(false);
+      }
+      let pullOk = false;
       try {
-        const remote = await fetchCloudState(user.id);
-        if (cancelled) return;
-        if (remote?.data) {
-          importJson(JSON.stringify(remote.data));
-        } else {
-          await saveCloudState(user.id, importState(exportJson()));
+        const remote = await fetchCloudStateWithRetry(userId);
+        if (cancelled || syncRun.current !== runId) return;
+        const local = syncActiveWorkspace(localRef.current);
+        const remoteState = remote?.data
+          ? importState(JSON.stringify(remote.data))
+          : null;
+        const plan = resolvePlannerSync(local, remoteState);
+        if (plan.applyRemote) {
+          importJson(JSON.stringify(plan.applyRemote));
         }
+        if (plan.uploadLocal) {
+          await saveCloudState(userId, syncActiveWorkspace(localRef.current));
+        }
+        pullOk = true;
       } catch (err) {
         console.error("cloud pull failed", err);
       } finally {
-        if (!cancelled) {
+        if (syncRun.current === runId) {
           pulling.current = false;
-          setCloudReady(true);
-          onGateReady(true);
+          if (!cancelled) {
+            setCloudReady(pullOk);
+            onGateReady(true);
+          }
         }
       }
-    })();
+    }
+
+    void syncFromCloud();
+
+    const onCleared = () => {
+      void syncFromCloud({ quiet: true });
+    };
+    window.addEventListener(PLANNER_STORAGE_CLEARED_EVENT, onCleared);
+
+    const retryIfLocalEmpty = () => {
+      if (cancelled || pulling.current) return;
+      if (plannerHasContent(localRef.current)) return;
+      void syncFromCloud({ quiet: true });
+    };
+    const onVis = () => {
+      if (document.visibilityState === "visible") retryIfLocalEmpty();
+    };
+    window.addEventListener("focus", retryIfLocalEmpty);
+    document.addEventListener("visibilitychange", onVis);
+    const poll = window.setInterval(retryIfLocalEmpty, 8000);
+    const stopPoll = window.setTimeout(() => window.clearInterval(poll), 120_000);
+
     return () => {
       cancelled = true;
+      window.removeEventListener(PLANNER_STORAGE_CLEARED_EVENT, onCleared);
+      window.removeEventListener("focus", retryIfLocalEmpty);
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(poll);
+      window.clearTimeout(stopPoll);
     };
-    // Only re-pull when the signed-in user changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, authReady, user?.id]);
+  }, [ready, authReady, user?.id, importJson, onGateReady]);
 
   useEffect(() => {
     if (!ready || !user || !cloudReady || pulling.current) return;
+    const next = syncActiveWorkspace(state);
+    if (!plannerHasContent(next)) return;
     const timer = window.setTimeout(() => {
-      void saveCloudState(user.id, importState(exportJson())).catch((err) => {
+      void saveCloudState(user.id, next).catch((err) => {
         console.error("cloud save failed", err);
       });
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [state, ready, user, cloudReady, exportJson]);
+  }, [state, ready, user, cloudReady]);
 
   return null;
 }
@@ -213,14 +258,9 @@ function CoverKeysSyncBridge() {
       try {
         const remote = await fetchCloudCoverKeys(user.id);
         if (cancelled) return;
-        const local = loadCoverKeys();
-        if (remote && hasUsableCoverKeys(remote)) {
-          saveCoverKeys(remote);
-        } else if (hasUsableCoverKeys(local)) {
-          await saveCloudCoverKeys(user.id, local);
-        } else if (remote) {
-          saveCoverKeys(remote);
-        }
+        const plan = mergeCoverKeys(loadCoverKeys(), remote);
+        if (plan.writeLocal) saveCoverKeys(plan.keys);
+        if (plan.writeRemote) await saveCloudCoverKeys(user.id, plan.keys);
       } catch (err) {
         console.error("cover keys sync failed", err);
       }

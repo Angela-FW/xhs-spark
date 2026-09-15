@@ -18,11 +18,13 @@ import {
   attachMaterial,
   clearPlannerStorage,
   createInitialState,
+  PLANNER_STORAGE_CLEARED_EVENT,
   deleteSavedPersona,
   exportState,
   hasPlannerStorage,
   importState,
   loadState,
+  plannerHasContent,
   appendNextCalendarWeek,
   rebuildCalendarFromPersona,
   rollUnpublishedSchedule,
@@ -116,11 +118,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const reconcileClearedStorage = () => {
       try {
         if (hasPlannerStorage()) return;
-        setState((s) =>
-          s.activeWorkspaceId || s.workspaces.length > 0
-            ? createInitialState()
-            : s,
-        );
+        let lostNotes = false;
+        setState((s) => {
+          if (!(s.activeWorkspaceId || s.workspaces.length > 0)) return s;
+          lostNotes = true;
+          return createInitialState();
+        });
+        if (lostNotes) {
+          window.dispatchEvent(new Event(PLANNER_STORAGE_CLEARED_EVENT));
+        }
       } catch (err) {
         console.error("reconcile storage failed", err);
       }
@@ -365,7 +371,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const exportJson = useCallback(() => exportState(state), [state]);
 
   const importJson = useCallback((json: string) => {
-    setState(importState(json));
+    const next = importState(json);
+    setState((s) =>
+      !plannerHasContent(next) && plannerHasContent(s) ? s : next,
+    );
   }, []);
 
   const resetAll = useCallback(() => {

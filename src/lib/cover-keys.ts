@@ -46,6 +46,53 @@ export function hasUsableCoverKeys(keys: StoredCoverKeys = loadCoverKeys()): boo
   return Boolean(keys.siliconflowKey?.trim());
 }
 
+/** Keep a usable Key from either device; never upload an empty Key over a real one. */
+export function mergeCoverKeys(
+  local: StoredCoverKeys,
+  remote: StoredCoverKeys | null,
+): {
+  keys: StoredCoverKeys;
+  writeLocal: boolean;
+  writeRemote: boolean;
+} {
+  const localKey = local.siliconflowKey?.trim() || "";
+  const remoteKey = remote?.siliconflowKey?.trim() || "";
+  if (localKey && !remoteKey) {
+    return {
+      keys: { ...local, siliconflowKey: localKey },
+      writeLocal: false,
+      writeRemote: true,
+    };
+  }
+  if (remoteKey && !localKey && remote) {
+    return {
+      keys: { ...remote, siliconflowKey: remoteKey },
+      writeLocal: true,
+      writeRemote: false,
+    };
+  }
+  if (localKey && remoteKey && remote) {
+    if (localKey === remoteKey) {
+      return { keys: local, writeLocal: false, writeRemote: false };
+    }
+    const localT = Date.parse(local.configuredAt || "") || 0;
+    const remoteT = Date.parse(remote.configuredAt || "") || 0;
+    if (remoteT > localT) {
+      return {
+        keys: { ...remote, siliconflowKey: remoteKey },
+        writeLocal: true,
+        writeRemote: false,
+      };
+    }
+    return {
+      keys: { ...local, siliconflowKey: localKey },
+      writeLocal: false,
+      writeRemote: true,
+    };
+  }
+  return { keys: local, writeLocal: false, writeRemote: false };
+}
+
 /** Local `next dev` may use SILICONFLOW_API_KEY in .env.local (this machine only). */
 export function usesLocalCoverFallback(): boolean {
   return process.env.NODE_ENV !== "production";

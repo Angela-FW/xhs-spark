@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/app-store";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { saveCloudState } from "@/lib/cloud-state";
+import { createInitialState } from "@/lib/store";
 import {
   LAUNCH_PRESETS,
   MAX_CUSTOM_PERSONAS,
@@ -124,6 +126,11 @@ export function PersonaPanel({ onDone }: { onDone?: () => void }) {
     }
     if (action.kind === "reset") {
       resetAll();
+      if (user) {
+        void saveCloudState(user.id, createInitialState()).catch((err) => {
+          console.error("cloud reset failed", err);
+        });
+      }
       setStep("pick");
       setSavedHint(null);
       return;
