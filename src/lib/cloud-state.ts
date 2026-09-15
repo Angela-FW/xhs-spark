@@ -3,6 +3,19 @@
 import type { AppState } from "@/lib/store";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
+type CloudFlushFn = (state?: AppState) => Promise<void>;
+
+let cloudFlushFn: CloudFlushFn | null = null;
+
+export function registerPlannerCloudFlush(fn: CloudFlushFn | null) {
+  cloudFlushFn = fn;
+}
+
+/** Push current (or given) planner state to the cloud immediately. */
+export function flushPlannerCloud(state?: AppState): Promise<void> {
+  return cloudFlushFn?.(state) ?? Promise.resolve();
+}
+
 export async function fetchCloudState(
   userId: string,
 ): Promise<{ data: AppState; updatedAt: string } | null> {

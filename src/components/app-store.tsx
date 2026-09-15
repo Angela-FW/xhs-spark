@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -51,7 +52,7 @@ type StoreApi = {
   setPostStatus: (
     postId: string,
     status: "planned" | "drafted" | "published",
-  ) => void;
+  ) => AppState;
   saveDraft: (
     postId: string,
     draft: {
@@ -61,7 +62,7 @@ type StoreApi = {
       tags: string[];
       extra?: string;
     },
-  ) => void;
+  ) => AppState;
   submitFeedback: (entry: Omit<FeedbackEntry, "id" | "createdAt">) => void;
   setPending: (pending: PendingCalibration | null) => void;
   confirmPending: () => void;
@@ -99,6 +100,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   // Render immediately with seed calendar so SSR/first paint never sticks on loading.
   const [state, setState] = useState<AppState>(() => createInitialState());
   const [hydrated, setHydrated] = useState(false);
+  const hydratedRef = useRef(false);
+  const stateRef = useRef(state);
+  hydratedRef.current = hydrated;
+  stateRef.current = state;
 
   useEffect(() => {
     try {
@@ -217,9 +222,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const flushLocal = (next: AppState) => {
+    stateRef.current = next;
+    if (!hydratedRef.current) return;
+    try {
+      saveState(next);
+    } catch (err) {
+      console.error("saveState failed", err);
+    }
+  };
+
   const setPostStatus = useCallback(
     (postId: string, status: "planned" | "drafted" | "published") => {
-      setState((s) => setPostPublishStatus(s, postId, status));
+      const next = setPostPublishStatus(stateRef.current, postId, status);
+      flushLocal(next);
+      setState(next);
+      return next;
     },
     [],
   );
@@ -235,7 +253,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         extra?: string;
       },
     ) => {
-      setState((s) => savePostDraft(s, postId, draft));
+      const next = savePostDraft(stateRef.current, postId, draft);
+      flushLocal(next);
+      setState(next);
+      return next;
     },
     [],
   );

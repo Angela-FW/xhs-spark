@@ -16,6 +16,8 @@ import {
 } from "@/lib/cloud-cover-keys";
 import {
   fetchCloudStateWithRetry,
+  flushPlannerCloud,
+  registerPlannerCloudFlush,
   saveCloudState,
   subscribePlannerState,
 } from "@/lib/cloud-state";
@@ -26,6 +28,7 @@ import {
   plannerHasContent,
   PLANNER_STORAGE_CLEARED_EVENT,
   syncActiveWorkspace,
+  type AppState,
 } from "@/lib/store";
 import { LAUNCH_PRESETS } from "@/lib/persona";
 
@@ -152,12 +155,62 @@ function CloudSyncBridge({
   const { state, ready, importJson } = useAppStore();
   const [cloudReady, setCloudReady] = useState(false);
   const pulling = useRef(false);
+  const pushing = useRef(false);
   const syncRun = useRef(0);
   const localRef = useRef(state);
+  const userIdRef = useRef(user?.id);
   const lastPushedFp = useRef("");
+  const lastPushedAt = useRef("");
+  const pendingPush = useRef<AppState | null>(null);
   const suppressPushUntil = useRef(0);
   const ignoreReloadUntil = useRef(0);
+  const pushNowRef = useRef<(explicit?: AppState) => Promise<void>>(async () => {});
   localRef.current = state;
+  userIdRef.current = user?.id;
+
+  pushNowRef.current = async (explicit?: AppState) => {
+    const userId = userIdRef.current;
+    if (!userId) return;
+    const next = syncActiveWorkspace(explicit ?? pendingPush.current ?? localRef.current);
+    pendingPush.current = next;
+    if (!plannerHasContent(next)) {
+      pendingPush.current = null;
+      return;
+    }
+    const fp = syncFingerprint(next);
+    if (fp === lastPushedFp.current) {
+      pendingPush.current = null;
+      return;
+    }
+    if (pushing.current) return;
+    pushing.current = true;
+    pendingPush.current = null;
+    ignoreReloadUntil.current = Date.now() + 8000;
+    let saved = false;
+    try {
+      const updatedAt = await saveCloudState(userId, next);
+      lastPushedFp.current = fp;
+      lastPushedAt.current = updatedAt;
+      saved = true;
+    } catch (err) {
+      console.error("cloud save failed", err);
+      pendingPush.current = next;
+    } finally {
+      pushing.current = false;
+    }
+    if (
+      saved &&
+      pendingPush.current &&
+      syncFingerprint(pendingPush.current) !== lastPushedFp.current
+    ) {
+      await pushNowRef.current(pendingPush.current);
+    }
+  };
+
+  useEffect(() => {
+    registerPlannerCloudFlush((explicit) => pushNowRef.current(explicit));
+    return () => registerPlannerCloudFlush(null);
+  }, []);
 
   useEffect(() => {
     if (!authReady || !ready) {
@@ -165,6 +218,9 @@ function CloudSyncBridge({
       return;
     }
     if (!user) {
+      lastPushedFp.current = "";
+      lastPushedAt.current = "";
+      pendingPush.current = null;
       setCloudReady(false);
       onGateReady(true);
       return;
@@ -180,7 +236,6 @@ function CloudSyncBridge({
         onGateReady(false);
         setCloudReady(false);
       }
-      let pullOk = false;
       try {
         const remote = await fetchCloudStateWithRetry(userId);
         if (cancelled || syncRun.current !== runId) return;
@@ -189,8 +244,12 @@ function CloudSyncBridge({
           ? importState(JSON.stringify(remote.data))
           : null;
         const remoteFp = remoteState ? syncFingerprint(remoteState) : "";
+        const remoteAt = remote?.updatedAt ?? "";
 
         if (opts?.quiet) {
+          if (lastPushedAt.current && remoteAt && remoteAt < lastPushedAt.current) {
+            return;
+          }
           if (
             remoteFp &&
             lastPushedFp.current &&
@@ -200,7 +259,6 @@ function CloudSyncBridge({
             window.location.reload();
             return;
           }
-          pullOk = true;
           return;
         }
 
@@ -208,24 +266,27 @@ function CloudSyncBridge({
         if (plan.applyLocal) {
           suppressPushUntil.current = Date.now() + 2000;
           lastPushedFp.current = syncFingerprint(plan.applyLocal);
+          lastPushedAt.current = remoteAt;
           importJson(JSON.stringify(plan.applyLocal), { force: true });
         } else {
           lastPushedFp.current = remoteFp || syncFingerprint(plan.upload ?? local);
+          if (remoteAt) lastPushedAt.current = remoteAt;
         }
         if (plan.upload) {
-          ignoreReloadUntil.current = Date.now() + 5000;
-          lastPushedFp.current = syncFingerprint(plan.upload);
-          await saveCloudState(userId, plan.upload);
+          pendingPush.current = plan.upload;
+          await pushNowRef.current(plan.upload);
         }
-        pullOk = true;
       } catch (err) {
         console.error("cloud pull failed", err);
       } finally {
         if (syncRun.current === runId) {
           pulling.current = false;
           if (!cancelled) {
-            setCloudReady(pullOk);
+            setCloudReady(true);
             onGateReady(true);
+            if (pendingPush.current) {
+              void pushNowRef.current(pendingPush.current);
+            }
           }
         }
       }
@@ -242,9 +303,14 @@ function CloudSyncBridge({
     };
     const onVis = () => {
       if (document.visibilityState === "visible") pullQuiet();
+      else void pushNowRef.current();
+    };
+    const onPageHide = () => {
+      void pushNowRef.current();
     };
     window.addEventListener(PLANNER_STORAGE_CLEARED_EVENT, onCleared);
     window.addEventListener("focus", pullQuiet);
+    window.addEventListener("pagehide", onPageHide);
     document.addEventListener("visibilitychange", onVis);
     const poll = window.setInterval(pullQuiet, 15_000);
     const unsubscribe = subscribePlannerState(userId, pullQuiet);
@@ -254,24 +320,20 @@ function CloudSyncBridge({
       unsubscribe();
       window.removeEventListener(PLANNER_STORAGE_CLEARED_EVENT, onCleared);
       window.removeEventListener("focus", pullQuiet);
+      window.removeEventListener("pagehide", onPageHide);
       document.removeEventListener("visibilitychange", onVis);
       window.clearInterval(poll);
     };
   }, [ready, authReady, user?.id, importJson, onGateReady]);
 
   useEffect(() => {
-    if (!ready || !user || !cloudReady || pulling.current) return;
+    if (!ready || !user || !cloudReady) return;
     if (Date.now() < suppressPushUntil.current) return;
     const next = syncActiveWorkspace(state);
     if (!plannerHasContent(next)) return;
-    const fp = syncFingerprint(next);
-    if (fp === lastPushedFp.current) return;
+    if (syncFingerprint(next) === lastPushedFp.current) return;
     const timer = window.setTimeout(() => {
-      ignoreReloadUntil.current = Date.now() + 5000;
-      lastPushedFp.current = fp;
-      void saveCloudState(user.id, next).catch((err) => {
-        console.error("cloud save failed", err);
-      });
+      void pushNowRef.current(next);
     }, 1000);
     return () => window.clearTimeout(timer);
   }, [state, ready, user, cloudReady]);
@@ -344,6 +406,7 @@ function PlannerInner() {
   }, []);
 
   async function onSignOut() {
+    await flushPlannerCloud();
     await signOut();
     resetAll();
     setPersonaOpen(false);

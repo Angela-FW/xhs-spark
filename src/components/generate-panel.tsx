@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, ImageIcon, RefreshCw, Sparkles } from "lucide-react";
 import { useAppStore } from "@/components/app-store";
 import { useAuth } from "@/components/auth-provider";
+import { flushPlannerCloud } from "@/lib/cloud-state";
 import { CoverKeysModal } from "@/components/cover-keys-modal";
 import {
   generateNoteFromPost,
@@ -60,7 +61,7 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
 
 export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const { state, setPostStatus, saveDraft } = useAppStore();
-  const { requireAuth } = useAuth();
+  const { requireAuth, user } = useAuth();
   const post = state.posts.find((p) => p.id === state.selectedPostId) ?? null;
   const [draftExtra, setDraftExtra] = useState("");
   const [note, setNote] = useState<GeneratedNote | null>(null);
@@ -85,10 +86,16 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
   const requireAuthRef = useRef(requireAuth);
   const draftExtraRef = useRef(draftExtra);
   const noteRef = useRef(note);
+  const postRef = useRef(post);
+  const titleIndexRef = useRef(titleIndex);
+  const saveDraftRef = useRef(saveDraft);
   const insightsRef = useRef(state.insights);
   requireAuthRef.current = requireAuth;
   draftExtraRef.current = draftExtra;
   noteRef.current = note;
+  postRef.current = post;
+  titleIndexRef.current = titleIndex;
+  saveDraftRef.current = saveDraft;
   insightsRef.current = state.insights;
   const hasCoverKey = hasUsableCoverKeys();
 
@@ -180,7 +187,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       keepTitles[post.draft?.titleIndex ?? 0] ?? keepTitles[0] ?? post.titleHint;
     const persona = state.persona;
     const extra = post.draft?.extra ?? "";
-    const postRef = post;
+    const targetPost = post;
     const insightFacts = state.insights.map((i) => ({
       id: i.id,
       raw: i.raw,
@@ -197,7 +204,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
       }
       try {
         const { note: next, result } = await generateNoteBodyForPost(
-          postRef,
+          targetPost,
           persona,
           draftExtraRef.current || extra,
           title,
@@ -209,6 +216,16 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
         if (reqId !== bodyReqId.current) return;
         setNote(next);
         setJustGenerated(true);
+        if (targetPost.status !== "published") {
+          const drafted = saveDraftRef.current(targetPost.id, {
+            titles: next.titles,
+            titleIndex: titleIndexRef.current,
+            body: next.body,
+            tags: next.tags,
+            extra: draftExtraRef.current,
+          });
+          void flushPlannerCloud(drafted);
+        }
         if (result.source === "ai") {
           setBodyHint(
             result.attempts > 1
@@ -234,18 +251,53 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
     };
   }, [resultUrl]);
 
-  function persistAndClose() {
-    if (post?.status !== "published" && post && note) {
-      saveDraft(post.id, {
-        titles: note.titles,
-        titleIndex,
-        body: note.body,
-        tags: note.tags,
-        extra: draftExtra,
-      });
+  const persistDraft = useCallback(() => {
+    const current = postRef.current;
+    const currentNote = noteRef.current;
+    if (!current || current.status === "published" || !currentNote) return;
+    const extra = draftExtraRef.current.trim() || undefined;
+    const prev = current.draft;
+    if (
+      prev &&
+      prev.body === currentNote.body &&
+      prev.titleIndex === titleIndexRef.current &&
+      (prev.extra ?? undefined) === extra &&
+      prev.titles.length === currentNote.titles.length &&
+      prev.titles.every((t, i) => t === currentNote.titles[i]) &&
+      prev.tags.length === currentNote.tags.length &&
+      prev.tags.every((t, i) => t === currentNote.tags[i])
+    ) {
+      return;
     }
+    const next = saveDraftRef.current(current.id, {
+      titles: currentNote.titles,
+      titleIndex: titleIndexRef.current,
+      body: currentNote.body,
+      tags: currentNote.tags,
+      extra: draftExtraRef.current,
+    });
+    void flushPlannerCloud(next);
+    return next;
+  }, []);
+
+  function persistAndClose() {
+    persistDraft();
     onClose?.();
   }
+
+  useEffect(() => {
+    const onPageHide = () => persistDraft();
+    const onVis = () => {
+      if (document.visibilityState === "hidden") persistDraft();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVis);
+      persistDraft();
+    };
+  }, [persistDraft]);
 
   const selectedTitle =
     note?.titles[titleIndex] ?? note?.titles[0] ?? post?.titleHint ?? "";
@@ -472,7 +524,7 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
           ) : (
             <>
               <p className="truncate text-sm text-[var(--ink-soft)]">
-                关闭时自动保存草稿
+                {user ? "保存后同步到云端" : "关闭时自动保存草稿"}
               </p>
               <Button
                 type="button"
@@ -796,7 +848,8 @@ export function GeneratePanel({ onClose }: { onClose?: () => void }) {
             tags: note.tags,
             extra: draftExtra,
           });
-          setPostStatus(post.id, "published");
+          const published = setPostStatus(post.id, "published");
+          void flushPlannerCloud(published);
           setConfirmPublish(false);
         }}
         onCancel={() => setConfirmPublish(false)}
