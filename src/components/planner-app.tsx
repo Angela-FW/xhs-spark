@@ -156,6 +156,7 @@ function CloudSyncBridge({
   const [cloudReady, setCloudReady] = useState(false);
   const pulling = useRef(false);
   const pushing = useRef(false);
+  const pulledOk = useRef(false);
   const syncRun = useRef(0);
   const localRef = useRef(state);
   const userIdRef = useRef(user?.id);
@@ -170,7 +171,7 @@ function CloudSyncBridge({
 
   pushNowRef.current = async (explicit?: AppState) => {
     const userId = userIdRef.current;
-    if (!userId) return;
+    if (!userId || !pulledOk.current) return;
     const next = syncActiveWorkspace(explicit ?? pendingPush.current ?? localRef.current);
     pendingPush.current = next;
     if (!plannerHasContent(next)) {
@@ -221,6 +222,7 @@ function CloudSyncBridge({
       lastPushedFp.current = "";
       lastPushedAt.current = "";
       pendingPush.current = null;
+      pulledOk.current = false;
       setCloudReady(false);
       onGateReady(true);
       return;
@@ -245,30 +247,16 @@ function CloudSyncBridge({
           : null;
         const remoteFp = remoteState ? syncFingerprint(remoteState) : "";
         const remoteAt = remote?.updatedAt ?? "";
-
-        if (opts?.quiet) {
-          if (lastPushedAt.current && remoteAt && remoteAt < lastPushedAt.current) {
-            return;
-          }
-          if (
-            remoteFp &&
-            lastPushedFp.current &&
-            remoteFp !== lastPushedFp.current &&
-            Date.now() >= ignoreReloadUntil.current
-          ) {
-            window.location.reload();
-            return;
-          }
-          return;
-        }
+        pulledOk.current = true;
 
         const plan = resolvePlannerSync(local, remoteState);
-        if (plan.applyLocal) {
+        const canApply = !opts?.quiet || Date.now() >= ignoreReloadUntil.current;
+        if (plan.applyLocal && canApply) {
           suppressPushUntil.current = Date.now() + 2000;
           lastPushedFp.current = syncFingerprint(plan.applyLocal);
-          lastPushedAt.current = remoteAt;
+          if (remoteAt) lastPushedAt.current = remoteAt;
           importJson(JSON.stringify(plan.applyLocal), { force: true });
-        } else {
+        } else if (!opts?.quiet) {
           lastPushedFp.current = remoteFp || syncFingerprint(plan.upload ?? local);
           if (remoteAt) lastPushedAt.current = remoteAt;
         }
@@ -282,10 +270,14 @@ function CloudSyncBridge({
         if (syncRun.current === runId) {
           pulling.current = false;
           if (!cancelled) {
-            setCloudReady(true);
             onGateReady(true);
-            if (pendingPush.current) {
-              void pushNowRef.current(pendingPush.current);
+            if (pulledOk.current) {
+              setCloudReady(true);
+              if (pendingPush.current) {
+                void pushNowRef.current(pendingPush.current);
+              }
+            } else {
+              setCloudReady(false);
             }
           }
         }
@@ -327,7 +319,7 @@ function CloudSyncBridge({
   }, [ready, authReady, user?.id, importJson, onGateReady]);
 
   useEffect(() => {
-    if (!ready || !user || !cloudReady) return;
+    if (!ready || !user || !cloudReady || pulling.current) return;
     if (Date.now() < suppressPushUntil.current) return;
     const next = syncActiveWorkspace(state);
     if (!plannerHasContent(next)) return;
@@ -498,14 +490,19 @@ function PlannerInner() {
                   退出 {user.email?.split("@")[0]}
                 </Button>
               ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-10 shrink-0 rounded-[8px] bg-[var(--coral)] px-4 text-white hover:bg-[var(--coral-deep)]"
-                  onClick={() => openAuth("login")}
-                >
-                  登录
-                </Button>
+                <div className="shrink-0 text-right">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-10 rounded-[8px] bg-[var(--coral)] px-4 text-white hover:bg-[var(--coral-deep)]"
+                    onClick={() => openAuth("login")}
+                  >
+                    登录
+                  </Button>
+                  <p className="mt-1 max-w-[10.5rem] text-[11px] leading-4 text-[var(--ink-soft)]">
+                    同一账号才能跨浏览器同步
+                  </p>
+                </div>
               )
             ) : null}
           </div>

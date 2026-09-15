@@ -1,6 +1,7 @@
 "use client";
 
 import type { AppState } from "@/lib/store";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/cloud-env";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 type CloudFlushFn = (state?: AppState) => Promise<void>;
@@ -81,14 +82,42 @@ export async function saveCloudState(
   const sb = getSupabaseBrowser();
   if (!sb) throw new Error("云端未配置");
   const updatedAt = new Date().toISOString();
-  const { error } = await sb.from("planner_state").upsert(
-    {
-      user_id: userId,
-      data: state,
-      updated_at: updatedAt,
-    },
-    { onConflict: "user_id" },
-  );
+  const row = {
+    user_id: userId,
+    data: state,
+    updated_at: updatedAt,
+  };
+
+  const hidden =
+    typeof document !== "undefined" && document.visibilityState === "hidden";
+  const payload = JSON.stringify(row);
+  if (hidden && payload.length < 60_000) {
+    const { data: sessionData } = await sb.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (token) {
+      const res = await fetch(
+        `${supabaseUrl().replace(/\/$/, "")}/rest/v1/planner_state?on_conflict=user_id`,
+        {
+          method: "POST",
+          keepalive: true,
+          headers: {
+            apikey: supabaseAnonKey(),
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Prefer: "resolution=merge-duplicates,return=minimal",
+          },
+          body: payload,
+        },
+      );
+      if (res.ok) return updatedAt;
+    }
+  }
+
+  const { data, error } = await sb
+    .from("planner_state")
+    .upsert(row, { onConflict: "user_id" })
+    .select("updated_at")
+    .single();
   if (error) throw new Error(error.message);
-  return updatedAt;
+  return (data?.updated_at as string) || updatedAt;
 }
